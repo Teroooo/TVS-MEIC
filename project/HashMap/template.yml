@@ -1,0 +1,25 @@
+# This YAML template is designed for capturing information about discovered
+# vulnerabilities.
+
+report:
+  - bug:
+      type: Nullptr Dereference
+      lineno: 106
+      class: tp
+      description: optional
+      recommendation: optional
+
+  - bug:
+      type: TODO
+      lineno: TODO
+      class: TODO
+      description: optional
+      recommendation: optional
+
+  - bug:
+      type: TODO
+      lineno: TODO
+      class: TODO
+      description: optional
+      recommendation: optional
+
