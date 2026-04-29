@@ -1,0 +1,84 @@
+report:
+  - bug:
+    type: Null Dereference
+    lineno: 76
+    class: tp
+    description: malloc for map (line 61) may return NULL, and malloc for fields checks failure but only frees map without returning, so execution continues and dereferences map at line 76
+    recommendation: Add NULL check for map after malloc, and add return NULL after free(map) when fields is NULL
+
+  - bug:
+    type: Memory Leak
+    lineno: 130
+    class: tp
+    description: In hashmap_set, when adding a new entry, a new entries array is allocated and copied from field->entries, but the old field->entries pointer is never freed before being overwritten
+    recommendation: Add free(field->entries) before assigning the new entries array
+
+  - bug:
+    type: Memory Leak
+    lineno: 156
+    class: tp
+    description: hashmap_get allocates memory for val and returns it to the caller, but in main() the returned pointer ret is never freed after use
+    recommendation: Add free(ret) in main() after the assert
+
+  - bug:
+    type: Null Dereference
+    lineno: 156
+    class: tp
+    description: val is allocated with malloc but not checked for NULL before being passed to memcpy, which would crash if malloc fails
+    recommendation: Add NULL check after malloc before calling memcpy
+
+  - bug:
+    type: Nullptr Dereference
+    lineno: 163
+    class: tp
+    description: hashmap_new may return NULL due to unchecked malloc failure, and the returned map is used in main without a NULL check
+    recommendation: Add NULL check for map after hashmap_new call in main
+
+  - bug:
+    type: Null Dereference
+    lineno: 72
+    class: tp
+    description: fields may be NULL if malloc fails (line 63), but the code only frees map without returning, so the loop dereferences the NULL fields pointer
+    recommendation: Add return NULL after free(map) when fields is NULL
+
+  - bug:
+    type: MallocSizeof
+    lineno: 124
+    class: tp
+    description: sizeof(key) returns the size of a pointer (8 bytes) instead of the length of the string, causing insufficient memory allocation for entry->key
+    recommendation: Replace sizeof(key) with strlen(key)+1
+
+  - bug:
+    type: Insecure strcpy
+    lineno: 125
+    class: fp
+    description: scan-build flags strcpy as insecure, but the buffer was already allocated with the appropriate size. strlcpy is not part of the C standard on Linux
+    recommendation: No action needed on Linux
+
+  - bug:
+    type: Insecure memcpy
+    lineno: 120
+    class: fp
+    description: scan-build flags memcpy as insecure suggesting memcpy_s, but memcpy_s is a Microsoft extension not available on Linux/GCC
+    recommendation: No action needed on Linux
+
+  - bug:
+    type: Insecure memcpy
+    lineno: 132
+    class: fp
+    description: Same as above, memcpy_s is not available on Linux
+    recommendation: No action needed on Linux
+
+  - bug:
+    type: Insecure memcpy
+    lineno: 138
+    class: fp
+    description: Same as above, memcpy_s is not available on Linux
+    recommendation: No action needed on Linux
+
+  - bug:
+    type: Insecure memcpy
+    lineno: 156
+    class: fp
+    description: Same as above, memcpy_s is not available on Linux
+    recommendation: No action needed on Linux

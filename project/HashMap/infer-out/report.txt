@@ -1,0 +1,55 @@
+#0
+hashmap.c:76: error: Null Dereference
+  pointer `map` last assigned on line 61 could be null and is dereferenced at line 76, column 3.
+  74.   }
+  75. 
+  76.   map->size = size;
+        ^
+  77.   map->fields = fields;
+  78. 
+
+#1
+hashmap.c:130: error: Memory Leak
+  Pulse found a potential memory leak. Memory dynamically allocated at line 118 by call to `malloc`, is not freed after the last access at line 130, column 7.
+  128. 
+  129. set_val:
+  130.   if (value != NULL) {
+             ^
+  131.     void *val = malloc(length);
+  132.     entry->val = memcpy(val, value, length);
+
+#2
+hashmap.c:156: error: Memory Leak
+  Pulse found a potential memory leak. Memory dynamically allocated at line 155 by call to `malloc`, is not freed after the last access at line 156, column 14.
+  154.     if (strcmp(entry->key, key) == 0) {
+  155.       void *val = malloc(entry->len);
+  156.       return memcpy(val, entry->val, entry->len);
+                    ^
+  157.     }
+  158.   }
+
+#3
+hashmap.c:156: error: Null Dereference
+  pointer `val` last assigned on line 155 could be null and is dereferenced by call to `memcpy()` at line 156, column 14.
+  154.     if (strcmp(entry->key, key) == 0) {
+  155.       void *val = malloc(entry->len);
+  156.       return memcpy(val, entry->val, entry->len);
+                    ^
+  157.     }
+  158.   }
+
+#4
+hashmap.c:163: error: Nullptr Dereference
+  Pulse found a potential null pointer dereference  on line 64 indirectly during the call to `hashmap_new()`in call to `hashmap_new()` .
+  161. 
+  162. int main() {
+  163.   hashmap_t map = hashmap_new(8);
+                         ^
+  164. 
+  165.   char *key = "42";
+
+Found 5 issues
+                Issue Type(ISSUED_TYPE_ID): #
+        Null Dereference(NULL_DEREFERENCE): 2
+                  Memory Leak(MEMORY_LEAK): 2
+  Nullptr Dereference(NULLPTR_DEREFERENCE): 1
