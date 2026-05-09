@@ -1,0 +1,143 @@
+# Exercise 1.1 - Static Analysis Report
+# Tools used: Infer (--pulse) and Clang Analyzer (scan-build)
+# File analyzed: hashmap.c
+
+report:
+  # ── INFER FINDINGS ──────────────────────────────────────────────────────────
+
+  - bug:
+      type: Null Dereference
+      lineno: 76
+      class: tp
+      description: >
+        map is allocated via malloc on line 61 but never checked for NULL.
+        If malloc fails, map->size on line 76 dereferences a NULL pointer,
+        causing a segmentation fault. Infer flags this because there is no
+        NULL guard between the malloc and the first field access.
+      recommendation: >
+        After malloc, check if map is NULL and return NULL (or handle the
+        error) before accessing any field. e.g. if (!map) { free(fields); return NULL; }
+
+  - bug:
+      type: Null Dereference
+      lineno: 156
+      class: tp
+      description: >
+        In hashmap_get, val is allocated via malloc on line 155. If malloc
+        fails it returns NULL, and memcpy(val, ...) on line 156 is called
+        immediately without a NULL check, causing undefined behavior / crash.
+      recommendation: >
+        Check if val is NULL after malloc before calling memcpy.
+        e.g. if (!val) return NULL;
+
+  - bug:
+      type: Memory Leak
+      lineno: 130
+      class: tp
+      description: >
+        In hashmap_set, memory is malloc'd on line 131 (val). If the goto
+        set_val path is taken when updating an existing key, the old entry
+        val was freed on line 108 but the new val allocated on line 131 may
+        leak if an error occurs before it is assigned. Infer flags the path
+        where val is not freed after last access at line 130.
+      recommendation: >
+        Ensure val is always freed on all error paths, or restructure the
+        code to avoid the goto pattern which makes memory ownership unclear.
+
+  - bug:
+      type: Memory Leak
+      lineno: 156
+      class: tp
+      description: >
+        In hashmap_get, val is malloc'd on line 155 and immediately returned
+        to the caller via memcpy on line 156. The caller receives a
+        heap-allocated copy but there is no documented contract requiring
+        the caller to free it. In main (line 169-170), ret is never freed
+        before the function returns, leaking the memory.
+      recommendation: >
+        Document that the caller is responsible for freeing the returned
+        pointer, and free ret in main after use. e.g. free(ret); before return.
+
+  - bug:
+      type: Nullptr Dereference
+      lineno: 163
+      class: tp
+      description: >
+        hashmap_new can return NULL (if map malloc fails on line 61), but
+        main on line 163 uses the returned value directly without any NULL
+        check. This is a consequence of the missing NULL guard in hashmap_new.
+        Infer flags this as an indirect null dereference through the call.
+      recommendation: >
+        Check the return value of hashmap_new before use.
+        e.g. if (!map) { fprintf(stderr, "Failed\n"); return 1; }
+
+  # ── CLANG ANALYZER FINDINGS ─────────────────────────────────────────────────
+
+  - bug:
+      type: Null Dereference
+      lineno: 72
+      class: tp
+      description: >
+        In hashmap_new, fields is allocated via malloc on line 63-64.
+        If malloc fails, fields is NULL. The code checks !fields on line 66
+        and frees map, but does NOT return — execution continues into the
+        for loop on line 70, where field = &fields[i] dereferences NULL
+        on line 72. Clang Analyzer flags field->size = 0 as a null dereference.
+      recommendation: >
+        After the !fields check, add a return NULL to exit the function
+        instead of falling through. e.g. if (!fields) { free(map); return NULL; }
+
+  - bug:
+      type: Bad Malloc Size (unix.MallocSizeof)
+      lineno: 124
+      class: tp
+      description: >
+        entry->key is allocated with malloc(sizeof(key)) on line 124.
+        Since key is a char*, sizeof(key) returns the size of a pointer
+        (8 bytes on 64-bit), NOT the length of the string. This means the
+        buffer is almost always too small for the actual key string, causing
+        a buffer overflow when strcpy copies the key on line 125.
+      recommendation: >
+        Replace malloc(sizeof(key)) with malloc(strlen(key) + 1) to
+        allocate enough space for the string and its null terminator.
+
+  - bug:
+      type: Insecure API - strcpy (security.insecureAPI.strcpy)
+      lineno: 125
+      class: tp
+      description: >
+        strcpy(entry->key, key) on line 125 performs an unbounded string
+        copy with no length check. Combined with the wrong malloc size on
+        line 124, this is a confirmed buffer overflow. Even if the malloc
+        size were fixed, strcpy is still considered unsafe as it provides
+        no boundary protection.
+      recommendation: >
+        Replace strcpy with strncpy or strlcpy and use malloc(strlen(key)+1)
+        on line 124. e.g. strncpy(entry->key, key, strlen(key) + 1);
+
+  - bug:
+      type: Memory Leak (unix.Malloc)
+      lineno: 170
+      class: tp
+      description: >
+        ret is assigned the return value of hashmap_get on line 169, which
+        returns a heap-allocated copy of the value. ret is used in the assert
+        on line 170 but is never freed before main returns, causing a memory
+        leak. Clang Analyzer flags the potential leak at the assert statement.
+      recommendation: >
+        Free ret after use. e.g. add free(ret); before the return 0 on line 173.
+
+  - bug:
+      type: Unsafe Buffer Handling - memcpy (security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+      lineno: 120
+      class: fp
+      description: >
+        Clang Analyzer flags all memcpy calls (lines 120, 132, 138, 156) as
+        unsafe because memcpy does not perform boundary checks as introduced
+        in C11 (memcpy_s). However, in this code the lengths passed to memcpy
+        are explicitly controlled by the programmer, making these warnings
+        overly conservative. No actual out-of-bounds access occurs.
+      recommendation: >
+        These are false positives in this context. If C11 compliance is
+        required, replace memcpy with memcpy_s and provide buffer size
+        arguments. Otherwise these can be safely suppressed.
