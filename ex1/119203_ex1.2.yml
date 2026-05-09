@@ -126,6 +126,19 @@ report:
         Infer nor Clang Analyzer flagged this specific path.
 
   - bug:
+      type: Memory Leak
+      lineno: 127
+      class: fn
+      description: |
+        Not found by any tool.
+        In function `hashmap_set`, when adding a new entry to a bucket that
+        already has entries, a new `entries` array is malloc'd (line 118),
+        the old entries are copied into it, and then `field->entries` is
+        replaced on line 127 — without freeing the old pointer. Every time
+        a hash bucket grows beyond its first element, the previous allocation
+        is lost, causing a memory leak.
+
+  - bug:
       type: Null Dereference / Memory Leak (realloc)
       lineno: 141
       class: fn
