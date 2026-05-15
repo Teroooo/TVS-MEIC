@@ -1,0 +1,2 @@
+KLEE: WARNING ONCE: Alignment of memory from call "call" is not modelled. Using alignment of 8.
+KLEE: WARNING ONCE: Alignment of memory from call "call2" is not modelled. Using alignment of 8.

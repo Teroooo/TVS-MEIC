@@ -1,0 +1,2202 @@
+/home/klee/work/ex2/treetable.c:
+    1|       |/*
+    2|       | * Collections-C
+    3|       | * Copyright (C) 2013-2015 Srđan Panić <srdja.panic@gmail.com>
+    4|       | *
+    5|       | * This file is part of Collections-C.
+    6|       | *
+    7|       | * Collections-C is free software: you can redistribute it and/or modify
+    8|       | * it under the terms of the GNU Lesser General Public License as published by
+    9|       | * the Free Software Foundation, either version 3 of the License, or
+   10|       | * (at your option) any later version.
+   11|       | *
+   12|       | * Collections-C is distributed in the hope that it will be useful,
+   13|       | * but WITHOUT ANY WARRANTY; without even the implied warranty of
+   14|       | * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+   15|       | * GNU Lesser General Public License for more details.
+   16|       | *
+   17|       | * You should have received a copy of the GNU Lesser General Public License
+   18|       | * along with Collections-C. If not, see <http://www.gnu.org/licenses/>.
+   19|       | */
+   20|       |
+   21|       |/* Tree operations are based on CLRS RB Tree. */
+   22|       |
+   23|       |#include "treetable.h"
+   24|       |
+   25|       |
+   26|     87|#define RB_BLACK 1
+   27|     84|#define RB_RED   0
+   28|       |
+   29|       |
+   30|       |struct treetable_s {
+   31|       |    RBNode *root;
+   32|       |    RBNode *sentinel;
+   33|       |    size_t  size;
+   34|       |
+   35|       |    int    (*cmp)        (const void *k1, const void *k2);
+   36|       |    void  *(*mem_alloc)  (size_t size);
+   37|       |    void  *(*mem_calloc) (size_t blocks, size_t size);
+   38|       |    void   (*mem_free)   (void *block);
+   39|       |};
+   40|       |
+   41|       |
+   42|       |static void rotate_left            (TreeTable *table, RBNode *n);
+   43|       |static void rotate_right           (TreeTable *table, RBNode *n);
+   44|       |static void rebalance_after_insert (TreeTable *table, RBNode *n);
+   45|       |static void tree_destroy           (TreeTable *table, RBNode *s);
+   46|       |
+   47|       |static INLINE RBNode *tree_min     (TreeTable const * const table, RBNode *n);
+   48|       |static INLINE RBNode *tree_max     (TreeTable const * const table, RBNode *n);
+   49|       |
+   50|       |static RBNode *get_tree_node_by_key(TreeTable const * const table, const void *key);
+   51|       |static RBNode *get_successor_node  (TreeTable const * const table, RBNode *x);
+   52|       |
+   53|     96|int cmp(void const *e1, void const *e2) {
+   54|     96|    int i = *((int *)e1);
+   55|     96|    int j = *((int *)e2);
+   56|       |
+   57|     96|    if (i < j)
+   58|     52|        return -1;
+   59|     44|    if (i == j)
+   60|      7|        return 0;
+   61|     37|    return 1;
+   62|     44|}
+   63|       |
+   64|       |
+   65|       |/**
+   66|       | * Initializes the TreehTableConf structs fields to default values.
+   67|       | *
+   68|       | * @param[in] conf the struct that is being initialized
+   69|       | */
+   70|       |void treetable_conf_init(TreeTableConf *conf)
+   71|     24|{
+   72|     24|    conf->mem_alloc  = malloc;
+   73|     24|    conf->mem_calloc = calloc;
+   74|     24|    conf->mem_free   = free;
+   75|     24|    conf->cmp        = cmp;
+   76|     24|}
+   77|       |
+   78|       |/**
+   79|       | * Creates a new TreeTable and returns a status code.
+   80|       | *
+   81|       | * @param[in] cmp the comparator used to order keys within the table
+   82|       | * @param[out] out Pointer to where the newly created TreeTable is to be stored
+   83|       | *
+   84|       | * @return CC_OK if the creation was successful, or CC_ERR_ALLOC if the memory
+   85|       | * allocation for the new TreeTable failed.
+   86|       | */
+   87|       |enum cc_stat treetable_new(TreeTable **tt)
+   88|      0|{
+   89|      0|    TreeTableConf conf;
+   90|      0|    treetable_conf_init(&conf);
+   91|      0|    return treetable_new_conf(&conf, tt);
+   92|      0|}
+   93|       |
+   94|       |/**
+   95|       | * Creates a new TreeTable based on the specified TreeTableConf struct and returns
+   96|       | * a status code.
+   97|       | *
+   98|       | * The table is allocated using the memory allocators specified in the TreeTableConf
+   99|       | * struct.
+  100|       | *
+  101|       | * @param[in] conf the TreeTableConf struct used to configure this new TreeTable
+  102|       | * @param[out] out Pointer to where the newly created TreeTable is stored
+  103|       | *
+  104|       | * @return CC_OK if the creation was successful, or CC_ERR_ALLOC if the memory
+  105|       | * allocation for the new TreeTable structure failed.
+  106|       | */
+  107|       |enum cc_stat treetable_new_conf(TreeTableConf const * const conf, TreeTable **tt)
+  108|     24|{
+  109|     24|    TreeTable *table = conf->mem_calloc(1, sizeof(TreeTable));
+  110|       |
+  111|     24|    if (!table)
+  112|      0|        return CC_ERR_ALLOC;
+  113|       |
+  114|     24|    RBNode *sentinel = conf->mem_calloc(1, sizeof(RBNode));
+  115|       |
+  116|     24|    if (!sentinel) {
+  117|      0|        conf->mem_free(table);
+  118|      0|        return CC_ERR_ALLOC;
+  119|      0|    }
+  120|       |
+  121|     24|    sentinel->color   = RB_BLACK;
+  122|       |
+  123|     24|    table->size       = 0;
+  124|     24|    table->cmp        = conf->cmp;
+  125|     24|    table->mem_alloc  = conf->mem_alloc;
+  126|     24|    table->mem_calloc = conf->mem_calloc;
+  127|     24|    table->mem_free   = conf->mem_free;
+  128|     24|    table->root       = sentinel;
+  129|     24|    table->sentinel   = sentinel;
+  130|       |
+  131|     24|    *tt = table;
+  132|     24|    return CC_OK;
+  133|     24|}
+  134|       |
+  135|       |/**
+  136|       | * Destroys the sub-tree specified by the root node n.
+  137|       | *
+  138|       | * @param[in] table TreeTable to be destroyed.
+  139|       | * @param[in] n root node of the sub tree that is being destroyed
+  140|       | */
+  141|       |static void tree_destroy(TreeTable *table, RBNode *n)
+  142|    132|{
+  143|    132|    if (n == table->sentinel)
+  144|     78|        return;
+  145|       |
+  146|     54|    tree_destroy(table, n->left);
+  147|     54|    tree_destroy(table, n->right);
+  148|       |
+  149|     54|    table->mem_free(n);
+  150|     54|}
+  ------------------
+  | test_add_duplicate_updates_value_only.c:tree_destroy:
+  |  142|      3|{
+  |  143|      3|    if (n == table->sentinel)
+  |  144|      2|        return;
+  |  145|       |
+  |  146|      1|    tree_destroy(table, n->left);
+  |  147|      1|    tree_destroy(table, n->right);
+  |  148|       |
+  |  149|      1|    table->mem_free(n);
+  |  150|      1|}
+  ------------------
+  | test_add_left_and_right_children.c:tree_destroy:
+  |  142|     10|{
+  |  143|     10|    if (n == table->sentinel)
+  |  144|      6|        return;
+  |  145|       |
+  |  146|      4|    tree_destroy(table, n->left);
+  |  147|      4|    tree_destroy(table, n->right);
+  |  148|       |
+  |  149|      4|    table->mem_free(n);
+  |  150|      4|}
+  ------------------
+  | test_add_root_preserves_validity.c:tree_destroy:
+  |  142|      3|{
+  |  143|      3|    if (n == table->sentinel)
+  |  144|      2|        return;
+  |  145|       |
+  |  146|      1|    tree_destroy(table, n->left);
+  |  147|      1|    tree_destroy(table, n->right);
+  |  148|       |
+  |  149|      1|    table->mem_free(n);
+  |  150|      1|}
+  ------------------
+  | test_add_three_symbolic_keys_preserves_validity.c:tree_destroy:
+  |  142|     42|{
+  |  143|     42|    if (n == table->sentinel)
+  |  144|     24|        return;
+  |  145|       |
+  |  146|     18|    tree_destroy(table, n->left);
+  |  147|     18|    tree_destroy(table, n->right);
+  |  148|       |
+  |  149|     18|    table->mem_free(n);
+  |  150|     18|}
+  ------------------
+  | test_get_first_key_is_minimum.c:tree_destroy:
+  |  142|     42|{
+  |  143|     42|    if (n == table->sentinel)
+  |  144|     24|        return;
+  |  145|       |
+  |  146|     18|    tree_destroy(table, n->left);
+  |  147|     18|    tree_destroy(table, n->right);
+  |  148|       |
+  |  149|     18|    table->mem_free(n);
+  |  150|     18|}
+  ------------------
+  | test_get_greater_than_absent_key_fails.c:tree_destroy:
+  |  142|      6|{
+  |  143|      6|    if (n == table->sentinel)
+  |  144|      4|        return;
+  |  145|       |
+  |  146|      2|    tree_destroy(table, n->left);
+  |  147|      2|    tree_destroy(table, n->right);
+  |  148|       |
+  |  149|      2|    table->mem_free(n);
+  |  150|      2|}
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_internal_null_successor_branch.c:tree_destroy
+  ------------------
+  | test_get_greater_than_maximum_key_is_total.c:tree_destroy:
+  |  142|      5|{
+  |  143|      5|    if (n == table->sentinel)
+  |  144|      3|        return;
+  |  145|       |
+  |  146|      2|    tree_destroy(table, n->left);
+  |  147|      2|    tree_destroy(table, n->right);
+  |  148|       |
+  |  149|      2|    table->mem_free(n);
+  |  150|      2|}
+  ------------------
+  | test_get_greater_than_uses_right_subtree_minimum.c:tree_destroy:
+  |  142|      7|{
+  |  143|      7|    if (n == table->sentinel)
+  |  144|      4|        return;
+  |  145|       |
+  |  146|      3|    tree_destroy(table, n->left);
+  |  147|      3|    tree_destroy(table, n->right);
+  |  148|       |
+  |  149|      3|    table->mem_free(n);
+  |  150|      3|}
+  ------------------
+  | test_get_greater_than_walks_to_parent_successor.c:tree_destroy:
+  |  142|      5|{
+  |  143|      5|    if (n == table->sentinel)
+  |  144|      3|        return;
+  |  145|       |
+  |  146|      2|    tree_destroy(table, n->left);
+  |  147|      2|    tree_destroy(table, n->right);
+  |  148|       |
+  |  149|      2|    table->mem_free(n);
+  |  150|      2|}
+  ------------------
+  | test_get_inserted_key_returns_value.c:tree_destroy:
+  |  142|      3|{
+  |  143|      3|    if (n == table->sentinel)
+  |  144|      2|        return;
+  |  145|       |
+  |  146|      1|    tree_destroy(table, n->left);
+  |  147|      1|    tree_destroy(table, n->right);
+  |  148|       |
+  |  149|      1|    table->mem_free(n);
+  |  150|      1|}
+  ------------------
+  | test_get_missing_keys_fail.c:tree_destroy:
+  |  142|      6|{
+  |  143|      6|    if (n == table->sentinel)
+  |  144|      4|        return;
+  |  145|       |
+  |  146|      2|    tree_destroy(table, n->left);
+  |  147|      2|    tree_destroy(table, n->right);
+  |  148|       |
+  |  149|      2|    table->mem_free(n);
+  |  150|      2|}
+  ------------------
+  151|       |
+  152|       |/**
+  153|       | * Destroys the specified TreeTable structure without destroying the the data
+  154|       | * it holds. In other words the keys and the values are not freed, only the
+  155|       | * table structure is.
+  156|       | *
+  157|       | * @param[in] table TreeTable to be destroyed.
+  158|       | */
+  159|       |void treetable_destroy(TreeTable *table)
+  160|     24|{
+  161|     24|    tree_destroy(table, table->root);
+  162|       |
+  163|     24|    table->mem_free(table->sentinel);
+  164|     24|    table->mem_free(table);
+  165|     24|}
+  166|       |
+  167|       |/**
+  168|       | * Gets a value associated with the specified key and sets the out
+  169|       | * parameter to it.
+  170|       | *
+  171|       | * @param[in] table the table from which the mapping is being returned
+  172|       | * @param[in] key   the key that is being looked up
+  173|       | * @param[out] out  Pointer to where the returned value is stored
+  174|       | *
+  175|       | * @return CC_OK if the key was found, or CC_ERR_KEY_NOT_FOUND if not.
+  176|       | */
+  177|       |enum cc_stat treetable_get(TreeTable const * const table, const void *key, void **out)
+  178|      6|{
+  179|      6|    RBNode *node = get_tree_node_by_key(table, key);
+  180|       |
+  181|      6|    if (!node)
+  182|      4|        return CC_ERR_KEY_NOT_FOUND;
+  183|       |
+  184|      2|    *out = node->value;
+  185|      2|    return CC_OK;
+  186|      6|}
+  187|       |
+  188|       |
+  189|       |/**
+  190|       | * Returns the first (lowest) key in the table and sets the out parameter
+  191|       | * to it.
+  192|       | *
+  193|       | * @param[in] table the table in which the lookup is performed
+  194|       | * @param[out] out  Pointer to where the returned key is stored
+  195|       | *
+  196|       | * @return CC_OK if the key was found, or CC_ERR_KEY_NOT_FOUND if not.
+  197|       | */
+  198|       |enum cc_stat treetable_get_first_key(TreeTable const * const table, void **out)
+  199|      6|{
+  200|      6|    RBNode *node = tree_min(table, table->root);
+  201|       |
+  202|      6|    if (node != table->sentinel) {
+  203|      6|        *out = node->key;
+  204|      6|        return CC_OK;
+  205|      6|    }
+  206|      0|    return CC_ERR_KEY_NOT_FOUND;
+  207|      6|}
+  208|       |
+  209|       |/**
+  210|       | * Gets the immediate successor of the specified key and sets the out
+  211|       | * parameter to its value.
+  212|       | *
+  213|       | * @param[in] table the table into which the lookup is performed
+  214|       | * @param[in] key   the key whose successor is being returned
+  215|       | * @param[out] out  Pointer to where the returned key is stored
+  216|       | *
+  217|       | * @return CC_OK if the key was found, or CC_ERR_KEY_NOT_FOUND if not.
+  218|       | */
+  219|       |enum cc_stat treetable_get_greater_than(TreeTable const * const table, const void *key, void **out)
+  220|      6|{
+  221|      6|    RBNode *n = get_tree_node_by_key(table, key);
+  222|      6|    RBNode *s = get_successor_node(table, n);
+  223|       |
+  224|      6|    if (n && s) {
+                           ^4
+  225|      3|        *out = s->key;
+  226|      3|        return CC_OK;
+  227|      3|    }
+  228|      3|    return CC_ERR_KEY_NOT_FOUND;
+  229|      6|}
+  230|       |
+  231|       |/**
+  232|       | * Returns the size of the specified TreeTable. Size of a TreeTable represents
+  233|       | * the number of key-value mappings within the table.
+  234|       | *
+  235|       | * @param[in] table the table whose size is being returned
+  236|       | *
+  237|       | * @return the size of the table
+  238|       | */
+  239|       |size_t treetable_size(TreeTable const * const table)
+  240|     10|{
+  241|     10|    return table->size;
+  242|     10|}
+  243|       |
+  244|       |/**
+  245|       | * Checks whether or not the TreeTable contains the specified key.
+  246|       | *
+  247|       | * @param[in] table the table into which the lookup is performed
+  248|       | * @param[in] key the key that is being looked up
+  249|       | *
+  250|       | * @return true if the table contains the key.
+  251|       | */
+  252|       |bool treetable_contains_key(TreeTable const * const table, const void *key)
+  253|      0|{
+  254|      0|    RBNode *node = get_tree_node_by_key(table, key);
+  255|       |
+  256|      0|    if (node)
+  257|      0|        return true;
+  258|       |
+  259|      0|    return false;
+  260|      0|}
+  261|       |
+  262|       |/**
+  263|       | * Checks whether or not the TreeTable contains the specified value.
+  264|       | *
+  265|       | * @param[in] table the table into which the lookup is performed
+  266|       | * @param[in] value the value that is being looked up
+  267|       | *
+  268|       | * @return number of occurrences of the specified value.
+  269|       | */
+  270|       |size_t treetable_contains_value(TreeTable const * const table, const void *value)
+  271|      0|{
+  272|      0|    RBNode *node = tree_min(table, table->root);
+  273|       |
+  274|      0|    size_t o = 0;
+  275|      0|    while (node != table->sentinel) {
+  276|      0|        if (node->value == value)
+  277|      0|            o++;
+  278|      0|        node = get_successor_node(table, node);
+  279|      0|    }
+  280|      0|    return o;
+  281|      0|}
+  282|       |
+  283|       |int balanced(TreeTable *t)
+  284|     11|{
+  285|     11|    if (!t)
+  286|      0|        return 1;
+  287|       |
+  288|     11|    if (t->root == t->sentinel)
+  289|      0|        return 1;
+  290|       |
+  291|     11|    struct frame {
+  292|     11|        RBNode *node;
+  293|       |        // state where we are in traversal,
+  294|       |        // 0 = we just arrived at this node, process left node
+  295|       |        // 1 = finished processing left, go process right
+  296|       |        // 2 = done, compare heights
+  297|     11|        int state;
+  298|     11|        int left_height;
+  299|     11|        int right_height;
+  300|     11|    };
+  301|       |
+  302|     11|    struct frame *stack = t->mem_alloc(t->size * sizeof(struct frame));
+  303|     11|    if (!stack)
+  304|      0|        return 0;
+  305|       |
+  306|     11|    size_t top = 0; // size/position of the stack
+  307|     11|    int ok = 1;
+  308|       |
+  309|     11|    stack[top++] = (struct frame) { t->root, 0, 0, 0 };
+  310|       |
+  311|     89|    while (top > 0 && ok) {
+                                    ^78
+  312|     78|        struct frame *current = &stack[top - 1]; // indexed by 0
+  313|       |
+  314|     78|        if (current->state == 0) { // check left
+  315|     26|            current->state = 1;
+  316|     26|            if (current->node->left != t->sentinel) // until null
+  317|      7|                stack[top++] = (struct frame) { current->node->left, 0, 0, 0 };
+  318|     52|        } else if (current->state == 1) { // check right
+  319|     26|            current->state = 2;
+  320|     26|            if (current->node->right != t->sentinel) // until null
+  321|      8|                stack[top++] = (struct frame) { current->node->right, 0, 0, 0 };
+  322|     26|        } else {
+  323|       |            // if we are here, both heights are already known
+  324|     26|            int diff = current->left_height - current->right_height;
+  325|     26|            if (diff < -1 || diff > 1) {
+  326|      0|                ok = 0;
+  327|      0|                break;
+  328|      0|            }
+  329|       |
+  330|     26|            int height;
+  331|       |            // height = max(left subtree height, right subtree height) + 1
+  332|     26|            height = (current->left_height > current->right_height ?
+  333|     25|                      current->left_height : current->right_height) + 1;
+                                    ^1
+  334|     26|            top--; // pass height to parent
+  335|       |
+  336|     26|            if (top > 0) {
+  337|     15|                if (stack[top - 1].state == 1) // update parent left height
+  338|      7|                    stack[top - 1].left_height = height;
+  339|      8|                else                           // update parent right height
+  340|      8|                    stack[top - 1].right_height = height;
+  341|     15|            }
+  342|     26|        }
+  343|     78|    }
+  344|       |
+  345|     11|    t->mem_free(stack);
+  346|     11|    return ok;
+  347|     11|}
+  348|       |
+  349|       |int sorted(TreeTable *t)
+  350|     11|{
+  351|     11|    if (!t)
+  352|      0|        return 1;
+  353|       |
+  354|     11|    if (t->root == t->sentinel)
+  355|      0|        return 1;
+  356|       |
+  357|     11|    RBNode **stack = t->mem_alloc(t->size * sizeof(RBNode *));
+  358|     11|    if (!stack)
+  359|      0|        return 0;
+  360|       |
+  361|     11|    size_t top = 0;
+  362|     11|    int ok = 1;
+  363|     11|    RBNode *node = t->root;
+  364|     11|    RBNode *previous = NULL;
+  365|       |
+  366|     37|    while ((node != t->sentinel || top > 0) && ok) {
+                                                 ^18         ^26
+  367|     52|        while (node != t->sentinel) { // traverse left
+  368|     26|            stack[top++] = node;
+  369|     26|            node = node->left;
+  370|     26|        }
+  371|       |
+  372|     26|        node = stack[--top]; // pop left most node
+  373|       |
+  374|     26|        if (previous && t->cmp(previous->key, node->key) >= 0) { // left > node > right 
+                                      ^15
+  375|      0|            ok = 0;
+  376|      0|            break;
+  377|      0|        }
+  378|       |
+  379|     26|        previous = node;
+  380|     26|        node = node->right; // traverse right
+  381|     26|    }
+  382|       |
+  383|     11|    t->mem_free(stack);
+  384|     11|    return ok;
+  385|     11|}
+  386|       |
+  387|       |
+  388|       |/**
+  389|       | * Creates a new key-value mapping in the specified TreeTable. If the unique key
+  390|       | * is already mapped to a value in this table, that value is replaced with the
+  391|       | * new value. This operation may fail if the space allocation for the new entry
+  392|       | * fails.
+  393|       | *
+  394|       | * @param[in] table the table to which this new key-value mapping is being added
+  395|       | * @param[in] key a tree table key used to access the specified value
+  396|       | * @param[in] val a value that is being stored in the table
+  397|       | *
+  398|       | * @return CC_OK if the operation was successful, or CC_ERR_ALLOC if the memory
+  399|       | * allocation for the new element failed.
+  400|       | */
+  401|       |enum cc_stat treetable_add(TreeTable *table, void *key, void *val) // 6 Paths
+  402|     55|{
+  403|     55|    RBNode *y = table->sentinel;
+  404|     55|    RBNode *x = table->root;
+  405|       |
+  406|     55|    int cmp;
+  407|     93|    while (x != table->sentinel) {
+  408|     39|        cmp = table->cmp(key, x->key);
+  409|     39|        y   = x;
+  410|       |
+  411|     39|        if (cmp < 0) {
+  412|     19|            x = x->left;
+  413|     20|        } else if (cmp > 0) {
+  414|     19|            x = x->right;
+  415|     19|        } else {
+  416|      1|            x->value = val;
+  417|      1|            return CC_OK;
+  418|      1|        }
+  419|     39|    }
+  420|     54|    RBNode *n = table->mem_alloc(sizeof(RBNode));
+  421|       |
+  422|     54|    n->value  = val;
+  423|     54|    n->key    = key;
+  424|     54|    n->parent = y;
+  425|     54|    n->left   = table->sentinel;
+  426|     54|    n->right  = table->sentinel;
+  427|       |
+  428|     54|    table->size++;
+  429|       |
+  430|     54|    if (y == table->sentinel) {
+  431|     24|        table->root = n;
+  432|     24|        n->color    = RB_BLACK;
+  433|     30|    } else {
+  434|     30|        n->color = RB_RED;
+  435|     30|        if (table->cmp(key, y->key) < 0) {
+  436|     15|            y->left = n;
+  437|     15|        } else {
+  438|     15|            y->right = n;
+  439|     15|        }
+  440|     30|        rebalance_after_insert(table, n);
+  441|     30|    }
+  442|     54|    return CC_OK;
+  443|     55|}
+  444|       |
+  445|       |/**
+  446|       | * Rebalances the tale after an insert.
+  447|       | *
+  448|       | * @param[in] table TreeTable that is being rebalanced
+  449|       | * @param[in] z Node that was inserted
+  450|       | */
+  451|       |static void rebalance_after_insert(TreeTable *table, RBNode *z)
+  452|     30|{
+  453|     30|    RBNode *y;
+  454|       |
+  455|     38|    while (z->parent->color == RB_RED) {
+  456|      8|        if (z->parent == z->parent->parent->left) {
+  457|      4|            y = z->parent->parent->right;
+  458|      4|            if (y->color == RB_RED) {
+  459|      0|                z->parent->color         = RB_BLACK;
+  460|      0|                y->color                 = RB_BLACK;
+  461|      0|                z->parent->parent->color = RB_RED;
+  462|      0|                z = z->parent->parent;
+  463|      4|            } else {
+  464|      4|                if (z == z->parent->right) {
+  465|      2|                    z = z->parent;
+  466|      2|                    rotate_left(table, z);
+  467|      2|                }
+  468|      4|                z->parent->color         = RB_BLACK;
+  469|      4|                z->parent->parent->color = RB_RED;
+  470|      4|                rotate_right(table, z->parent->parent);
+  471|      4|            }
+  472|      4|        } else {
+  473|      4|            y = z->parent->parent->left;
+  474|      4|            if (y->color == RB_RED) {
+  475|      0|                z->parent->color         = RB_BLACK;
+  476|      0|                y->color                 = RB_BLACK;
+  477|      0|                z->parent->parent->color = RB_RED;
+  478|      0|                z = z->parent->parent;
+  479|      4|            } else {
+  480|      4|                if (z == z->parent->left) {
+  481|      2|                    z = z->parent;
+  482|      2|                    rotate_right(table, z);
+  483|      2|                }
+  484|      4|                z->parent->color         = RB_BLACK;
+  485|      4|                z->parent->parent->color = RB_RED;
+  486|      4|                rotate_left(table, z->parent->parent);
+  487|      4|            }
+  488|      4|        }
+  489|      8|    }
+  490|     30|    table->root->color = RB_BLACK;
+  491|     30|}
+  ------------------
+  | Unexecuted instantiation: test_add_duplicate_updates_value_only.c:rebalance_after_insert
+  ------------------
+  | test_add_left_and_right_children.c:rebalance_after_insert:
+  |  452|      2|{
+  |  453|      2|    RBNode *y;
+  |  454|       |
+  |  455|      2|    while (z->parent->color == RB_RED) {
+  |  456|      0|        if (z->parent == z->parent->parent->left) {
+  |  457|      0|            y = z->parent->parent->right;
+  |  458|      0|            if (y->color == RB_RED) {
+  |  459|      0|                z->parent->color         = RB_BLACK;
+  |  460|      0|                y->color                 = RB_BLACK;
+  |  461|      0|                z->parent->parent->color = RB_RED;
+  |  462|      0|                z = z->parent->parent;
+  |  463|      0|            } else {
+  |  464|      0|                if (z == z->parent->right) {
+  |  465|      0|                    z = z->parent;
+  |  466|      0|                    rotate_left(table, z);
+  |  467|      0|                }
+  |  468|      0|                z->parent->color         = RB_BLACK;
+  |  469|      0|                z->parent->parent->color = RB_RED;
+  |  470|      0|                rotate_right(table, z->parent->parent);
+  |  471|      0|            }
+  |  472|      0|        } else {
+  |  473|      0|            y = z->parent->parent->left;
+  |  474|      0|            if (y->color == RB_RED) {
+  |  475|      0|                z->parent->color         = RB_BLACK;
+  |  476|      0|                y->color                 = RB_BLACK;
+  |  477|      0|                z->parent->parent->color = RB_RED;
+  |  478|      0|                z = z->parent->parent;
+  |  479|      0|            } else {
+  |  480|      0|                if (z == z->parent->left) {
+  |  481|      0|                    z = z->parent;
+  |  482|      0|                    rotate_right(table, z);
+  |  483|      0|                }
+  |  484|      0|                z->parent->color         = RB_BLACK;
+  |  485|      0|                z->parent->parent->color = RB_RED;
+  |  486|      0|                rotate_left(table, z->parent->parent);
+  |  487|      0|            }
+  |  488|      0|        }
+  |  489|      0|    }
+  |  490|      2|    table->root->color = RB_BLACK;
+  |  491|      2|}
+  ------------------
+  | Unexecuted instantiation: test_add_root_preserves_validity.c:rebalance_after_insert
+  ------------------
+  | test_add_three_symbolic_keys_preserves_validity.c:rebalance_after_insert:
+  |  452|     12|{
+  |  453|     12|    RBNode *y;
+  |  454|       |
+  |  455|     16|    while (z->parent->color == RB_RED) {
+  |  456|      4|        if (z->parent == z->parent->parent->left) {
+  |  457|      2|            y = z->parent->parent->right;
+  |  458|      2|            if (y->color == RB_RED) {
+  |  459|      0|                z->parent->color         = RB_BLACK;
+  |  460|      0|                y->color                 = RB_BLACK;
+  |  461|      0|                z->parent->parent->color = RB_RED;
+  |  462|      0|                z = z->parent->parent;
+  |  463|      2|            } else {
+  |  464|      2|                if (z == z->parent->right) {
+  |  465|      1|                    z = z->parent;
+  |  466|      1|                    rotate_left(table, z);
+  |  467|      1|                }
+  |  468|      2|                z->parent->color         = RB_BLACK;
+  |  469|      2|                z->parent->parent->color = RB_RED;
+  |  470|      2|                rotate_right(table, z->parent->parent);
+  |  471|      2|            }
+  |  472|      2|        } else {
+  |  473|      2|            y = z->parent->parent->left;
+  |  474|      2|            if (y->color == RB_RED) {
+  |  475|      0|                z->parent->color         = RB_BLACK;
+  |  476|      0|                y->color                 = RB_BLACK;
+  |  477|      0|                z->parent->parent->color = RB_RED;
+  |  478|      0|                z = z->parent->parent;
+  |  479|      2|            } else {
+  |  480|      2|                if (z == z->parent->left) {
+  |  481|      1|                    z = z->parent;
+  |  482|      1|                    rotate_right(table, z);
+  |  483|      1|                }
+  |  484|      2|                z->parent->color         = RB_BLACK;
+  |  485|      2|                z->parent->parent->color = RB_RED;
+  |  486|      2|                rotate_left(table, z->parent->parent);
+  |  487|      2|            }
+  |  488|      2|        }
+  |  489|      4|    }
+  |  490|     12|    table->root->color = RB_BLACK;
+  |  491|     12|}
+  ------------------
+  | test_get_first_key_is_minimum.c:rebalance_after_insert:
+  |  452|     12|{
+  |  453|     12|    RBNode *y;
+  |  454|       |
+  |  455|     16|    while (z->parent->color == RB_RED) {
+  |  456|      4|        if (z->parent == z->parent->parent->left) {
+  |  457|      2|            y = z->parent->parent->right;
+  |  458|      2|            if (y->color == RB_RED) {
+  |  459|      0|                z->parent->color         = RB_BLACK;
+  |  460|      0|                y->color                 = RB_BLACK;
+  |  461|      0|                z->parent->parent->color = RB_RED;
+  |  462|      0|                z = z->parent->parent;
+  |  463|      2|            } else {
+  |  464|      2|                if (z == z->parent->right) {
+  |  465|      1|                    z = z->parent;
+  |  466|      1|                    rotate_left(table, z);
+  |  467|      1|                }
+  |  468|      2|                z->parent->color         = RB_BLACK;
+  |  469|      2|                z->parent->parent->color = RB_RED;
+  |  470|      2|                rotate_right(table, z->parent->parent);
+  |  471|      2|            }
+  |  472|      2|        } else {
+  |  473|      2|            y = z->parent->parent->left;
+  |  474|      2|            if (y->color == RB_RED) {
+  |  475|      0|                z->parent->color         = RB_BLACK;
+  |  476|      0|                y->color                 = RB_BLACK;
+  |  477|      0|                z->parent->parent->color = RB_RED;
+  |  478|      0|                z = z->parent->parent;
+  |  479|      2|            } else {
+  |  480|      2|                if (z == z->parent->left) {
+  |  481|      1|                    z = z->parent;
+  |  482|      1|                    rotate_right(table, z);
+  |  483|      1|                }
+  |  484|      2|                z->parent->color         = RB_BLACK;
+  |  485|      2|                z->parent->parent->color = RB_RED;
+  |  486|      2|                rotate_left(table, z->parent->parent);
+  |  487|      2|            }
+  |  488|      2|        }
+  |  489|      4|    }
+  |  490|     12|    table->root->color = RB_BLACK;
+  |  491|     12|}
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_absent_key_fails.c:rebalance_after_insert
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_internal_null_successor_branch.c:rebalance_after_insert
+  ------------------
+  | test_get_greater_than_maximum_key_is_total.c:rebalance_after_insert:
+  |  452|      1|{
+  |  453|      1|    RBNode *y;
+  |  454|       |
+  |  455|      1|    while (z->parent->color == RB_RED) {
+  |  456|      0|        if (z->parent == z->parent->parent->left) {
+  |  457|      0|            y = z->parent->parent->right;
+  |  458|      0|            if (y->color == RB_RED) {
+  |  459|      0|                z->parent->color         = RB_BLACK;
+  |  460|      0|                y->color                 = RB_BLACK;
+  |  461|      0|                z->parent->parent->color = RB_RED;
+  |  462|      0|                z = z->parent->parent;
+  |  463|      0|            } else {
+  |  464|      0|                if (z == z->parent->right) {
+  |  465|      0|                    z = z->parent;
+  |  466|      0|                    rotate_left(table, z);
+  |  467|      0|                }
+  |  468|      0|                z->parent->color         = RB_BLACK;
+  |  469|      0|                z->parent->parent->color = RB_RED;
+  |  470|      0|                rotate_right(table, z->parent->parent);
+  |  471|      0|            }
+  |  472|      0|        } else {
+  |  473|      0|            y = z->parent->parent->left;
+  |  474|      0|            if (y->color == RB_RED) {
+  |  475|      0|                z->parent->color         = RB_BLACK;
+  |  476|      0|                y->color                 = RB_BLACK;
+  |  477|      0|                z->parent->parent->color = RB_RED;
+  |  478|      0|                z = z->parent->parent;
+  |  479|      0|            } else {
+  |  480|      0|                if (z == z->parent->left) {
+  |  481|      0|                    z = z->parent;
+  |  482|      0|                    rotate_right(table, z);
+  |  483|      0|                }
+  |  484|      0|                z->parent->color         = RB_BLACK;
+  |  485|      0|                z->parent->parent->color = RB_RED;
+  |  486|      0|                rotate_left(table, z->parent->parent);
+  |  487|      0|            }
+  |  488|      0|        }
+  |  489|      0|    }
+  |  490|      1|    table->root->color = RB_BLACK;
+  |  491|      1|}
+  ------------------
+  | test_get_greater_than_uses_right_subtree_minimum.c:rebalance_after_insert:
+  |  452|      2|{
+  |  453|      2|    RBNode *y;
+  |  454|       |
+  |  455|      2|    while (z->parent->color == RB_RED) {
+  |  456|      0|        if (z->parent == z->parent->parent->left) {
+  |  457|      0|            y = z->parent->parent->right;
+  |  458|      0|            if (y->color == RB_RED) {
+  |  459|      0|                z->parent->color         = RB_BLACK;
+  |  460|      0|                y->color                 = RB_BLACK;
+  |  461|      0|                z->parent->parent->color = RB_RED;
+  |  462|      0|                z = z->parent->parent;
+  |  463|      0|            } else {
+  |  464|      0|                if (z == z->parent->right) {
+  |  465|      0|                    z = z->parent;
+  |  466|      0|                    rotate_left(table, z);
+  |  467|      0|                }
+  |  468|      0|                z->parent->color         = RB_BLACK;
+  |  469|      0|                z->parent->parent->color = RB_RED;
+  |  470|      0|                rotate_right(table, z->parent->parent);
+  |  471|      0|            }
+  |  472|      0|        } else {
+  |  473|      0|            y = z->parent->parent->left;
+  |  474|      0|            if (y->color == RB_RED) {
+  |  475|      0|                z->parent->color         = RB_BLACK;
+  |  476|      0|                y->color                 = RB_BLACK;
+  |  477|      0|                z->parent->parent->color = RB_RED;
+  |  478|      0|                z = z->parent->parent;
+  |  479|      0|            } else {
+  |  480|      0|                if (z == z->parent->left) {
+  |  481|      0|                    z = z->parent;
+  |  482|      0|                    rotate_right(table, z);
+  |  483|      0|                }
+  |  484|      0|                z->parent->color         = RB_BLACK;
+  |  485|      0|                z->parent->parent->color = RB_RED;
+  |  486|      0|                rotate_left(table, z->parent->parent);
+  |  487|      0|            }
+  |  488|      0|        }
+  |  489|      0|    }
+  |  490|      2|    table->root->color = RB_BLACK;
+  |  491|      2|}
+  ------------------
+  | test_get_greater_than_walks_to_parent_successor.c:rebalance_after_insert:
+  |  452|      1|{
+  |  453|      1|    RBNode *y;
+  |  454|       |
+  |  455|      1|    while (z->parent->color == RB_RED) {
+  |  456|      0|        if (z->parent == z->parent->parent->left) {
+  |  457|      0|            y = z->parent->parent->right;
+  |  458|      0|            if (y->color == RB_RED) {
+  |  459|      0|                z->parent->color         = RB_BLACK;
+  |  460|      0|                y->color                 = RB_BLACK;
+  |  461|      0|                z->parent->parent->color = RB_RED;
+  |  462|      0|                z = z->parent->parent;
+  |  463|      0|            } else {
+  |  464|      0|                if (z == z->parent->right) {
+  |  465|      0|                    z = z->parent;
+  |  466|      0|                    rotate_left(table, z);
+  |  467|      0|                }
+  |  468|      0|                z->parent->color         = RB_BLACK;
+  |  469|      0|                z->parent->parent->color = RB_RED;
+  |  470|      0|                rotate_right(table, z->parent->parent);
+  |  471|      0|            }
+  |  472|      0|        } else {
+  |  473|      0|            y = z->parent->parent->left;
+  |  474|      0|            if (y->color == RB_RED) {
+  |  475|      0|                z->parent->color         = RB_BLACK;
+  |  476|      0|                y->color                 = RB_BLACK;
+  |  477|      0|                z->parent->parent->color = RB_RED;
+  |  478|      0|                z = z->parent->parent;
+  |  479|      0|            } else {
+  |  480|      0|                if (z == z->parent->left) {
+  |  481|      0|                    z = z->parent;
+  |  482|      0|                    rotate_right(table, z);
+  |  483|      0|                }
+  |  484|      0|                z->parent->color         = RB_BLACK;
+  |  485|      0|                z->parent->parent->color = RB_RED;
+  |  486|      0|                rotate_left(table, z->parent->parent);
+  |  487|      0|            }
+  |  488|      0|        }
+  |  489|      0|    }
+  |  490|      1|    table->root->color = RB_BLACK;
+  |  491|      1|}
+  ------------------
+  | Unexecuted instantiation: test_get_inserted_key_returns_value.c:rebalance_after_insert
+  ------------------
+  | Unexecuted instantiation: test_get_missing_keys_fail.c:rebalance_after_insert
+  ------------------
+  492|       |
+  493|       |static INLINE RBNode *tree_min(TreeTable const * const table, RBNode *n)
+  494|      7|{
+  495|      7|    RBNode *s = table->sentinel;
+  496|       |
+  497|     13|    while (n->left != s)
+  498|      6|        n = n->left;
+  499|      7|    return n;
+  500|      7|}
+  ------------------
+  | Unexecuted instantiation: test_add_duplicate_updates_value_only.c:tree_min
+  ------------------
+  | Unexecuted instantiation: test_add_left_and_right_children.c:tree_min
+  ------------------
+  | Unexecuted instantiation: test_add_root_preserves_validity.c:tree_min
+  ------------------
+  | Unexecuted instantiation: test_add_three_symbolic_keys_preserves_validity.c:tree_min
+  ------------------
+  | test_get_first_key_is_minimum.c:tree_min:
+  |  494|      6|{
+  |  495|      6|    RBNode *s = table->sentinel;
+  |  496|       |
+  |  497|     12|    while (n->left != s)
+  |  498|      6|        n = n->left;
+  |  499|      6|    return n;
+  |  500|      6|}
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_absent_key_fails.c:tree_min
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_internal_null_successor_branch.c:tree_min
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_maximum_key_is_total.c:tree_min
+  ------------------
+  | test_get_greater_than_uses_right_subtree_minimum.c:tree_min:
+  |  494|      1|{
+  |  495|      1|    RBNode *s = table->sentinel;
+  |  496|       |
+  |  497|      1|    while (n->left != s)
+  |  498|      0|        n = n->left;
+  |  499|      1|    return n;
+  |  500|      1|}
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_walks_to_parent_successor.c:tree_min
+  ------------------
+  | Unexecuted instantiation: test_get_inserted_key_returns_value.c:tree_min
+  ------------------
+  | Unexecuted instantiation: test_get_missing_keys_fail.c:tree_min
+  ------------------
+  501|       |
+  502|       |static INLINE RBNode *tree_max(TreeTable const * const table, RBNode *n)
+  503|      0|{
+  504|      0|    RBNode *s = table->sentinel;
+  505|      0|
+  506|      0|    while (n->right != s)
+  507|      0|        n = n->right;
+  508|      0|    return n;
+  509|      0|}
+  ------------------
+  | Unexecuted instantiation: test_add_duplicate_updates_value_only.c:tree_max
+  ------------------
+  | Unexecuted instantiation: test_add_left_and_right_children.c:tree_max
+  ------------------
+  | Unexecuted instantiation: test_add_root_preserves_validity.c:tree_max
+  ------------------
+  | Unexecuted instantiation: test_add_three_symbolic_keys_preserves_validity.c:tree_max
+  ------------------
+  | Unexecuted instantiation: test_get_first_key_is_minimum.c:tree_max
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_absent_key_fails.c:tree_max
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_internal_null_successor_branch.c:tree_max
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_maximum_key_is_total.c:tree_max
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_uses_right_subtree_minimum.c:tree_max
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_walks_to_parent_successor.c:tree_max
+  ------------------
+  | Unexecuted instantiation: test_get_inserted_key_returns_value.c:tree_max
+  ------------------
+  | Unexecuted instantiation: test_get_missing_keys_fail.c:tree_max
+  ------------------
+  510|       |
+  511|       |/**
+  512|       | * Performs a right rotation on the specified table's RB tree at root <code>
+  513|       | * x</code>
+  514|       | *
+  515|       | * @param[in] table the table on which this operation is performed
+  516|       | * @param[in] x the node around which this operation is performed
+  517|       | */
+  518|       |static void rotate_right(TreeTable *table, RBNode *x)
+  519|      6|{
+  520|      6|    RBNode *y = x->left;
+  521|       |
+  522|      6|    x->left = y->right;
+  523|       |
+  524|      6|    if (y->right != table->sentinel)
+  525|      0|        y->right->parent = x;
+  526|       |
+  527|      6|    y->parent = x->parent;
+  528|       |
+  529|      6|    if (x->parent == table->sentinel)
+  530|      4|        table->root = y;
+  531|      2|    else if (x == x->parent->right)
+  532|      2|        x->parent->right = y;
+  533|      0|    else
+  534|      0|        x->parent->left = y;
+  535|       |
+  536|      6|    y->right  = x;
+  537|      6|    x->parent = y;
+  538|      6|}
+  ------------------
+  | Unexecuted instantiation: test_add_duplicate_updates_value_only.c:rotate_right
+  ------------------
+  | Unexecuted instantiation: test_add_left_and_right_children.c:rotate_right
+  ------------------
+  | Unexecuted instantiation: test_add_root_preserves_validity.c:rotate_right
+  ------------------
+  | test_add_three_symbolic_keys_preserves_validity.c:rotate_right:
+  |  519|      3|{
+  |  520|      3|    RBNode *y = x->left;
+  |  521|       |
+  |  522|      3|    x->left = y->right;
+  |  523|       |
+  |  524|      3|    if (y->right != table->sentinel)
+  |  525|      0|        y->right->parent = x;
+  |  526|       |
+  |  527|      3|    y->parent = x->parent;
+  |  528|       |
+  |  529|      3|    if (x->parent == table->sentinel)
+  |  530|      2|        table->root = y;
+  |  531|      1|    else if (x == x->parent->right)
+  |  532|      1|        x->parent->right = y;
+  |  533|      0|    else
+  |  534|      0|        x->parent->left = y;
+  |  535|       |
+  |  536|      3|    y->right  = x;
+  |  537|      3|    x->parent = y;
+  |  538|      3|}
+  ------------------
+  | test_get_first_key_is_minimum.c:rotate_right:
+  |  519|      3|{
+  |  520|      3|    RBNode *y = x->left;
+  |  521|       |
+  |  522|      3|    x->left = y->right;
+  |  523|       |
+  |  524|      3|    if (y->right != table->sentinel)
+  |  525|      0|        y->right->parent = x;
+  |  526|       |
+  |  527|      3|    y->parent = x->parent;
+  |  528|       |
+  |  529|      3|    if (x->parent == table->sentinel)
+  |  530|      2|        table->root = y;
+  |  531|      1|    else if (x == x->parent->right)
+  |  532|      1|        x->parent->right = y;
+  |  533|      0|    else
+  |  534|      0|        x->parent->left = y;
+  |  535|       |
+  |  536|      3|    y->right  = x;
+  |  537|      3|    x->parent = y;
+  |  538|      3|}
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_absent_key_fails.c:rotate_right
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_internal_null_successor_branch.c:rotate_right
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_maximum_key_is_total.c:rotate_right
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_uses_right_subtree_minimum.c:rotate_right
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_walks_to_parent_successor.c:rotate_right
+  ------------------
+  | Unexecuted instantiation: test_get_inserted_key_returns_value.c:rotate_right
+  ------------------
+  | Unexecuted instantiation: test_get_missing_keys_fail.c:rotate_right
+  ------------------
+  539|       |
+  540|       |/**
+  541|       | * Performs a left rotation on the specified table's RB tree at root <code>
+  542|       | * x</code>
+  543|       | *
+  544|       | * @param[in] table the table on which this operation is performed
+  545|       | * @param[in] x the node around which this operation is performed
+  546|       | */
+  547|       |static void rotate_left(TreeTable *table, RBNode *x)
+  548|      6|{
+  549|      6|    RBNode *y = x->right;
+  550|       |
+  551|      6|    x->right = y->left;
+  552|       |
+  553|      6|    if (y->left != table->sentinel)
+  554|      0|        y->left->parent = x;
+  555|       |
+  556|      6|    y->parent = x->parent;
+  557|       |
+  558|      6|    if (x->parent == table->sentinel)
+  559|      4|        table->root = y;
+  560|      2|    else if (x == x->parent->left)
+  561|      2|        x->parent->left = y;
+  562|      0|    else
+  563|      0|        x->parent->right = y;
+  564|       |
+  565|      6|    y->left   = x;
+  566|      6|    x->parent = y;
+  567|      6|}
+  ------------------
+  | Unexecuted instantiation: test_add_duplicate_updates_value_only.c:rotate_left
+  ------------------
+  | Unexecuted instantiation: test_add_left_and_right_children.c:rotate_left
+  ------------------
+  | Unexecuted instantiation: test_add_root_preserves_validity.c:rotate_left
+  ------------------
+  | test_add_three_symbolic_keys_preserves_validity.c:rotate_left:
+  |  548|      3|{
+  |  549|      3|    RBNode *y = x->right;
+  |  550|       |
+  |  551|      3|    x->right = y->left;
+  |  552|       |
+  |  553|      3|    if (y->left != table->sentinel)
+  |  554|      0|        y->left->parent = x;
+  |  555|       |
+  |  556|      3|    y->parent = x->parent;
+  |  557|       |
+  |  558|      3|    if (x->parent == table->sentinel)
+  |  559|      2|        table->root = y;
+  |  560|      1|    else if (x == x->parent->left)
+  |  561|      1|        x->parent->left = y;
+  |  562|      0|    else
+  |  563|      0|        x->parent->right = y;
+  |  564|       |
+  |  565|      3|    y->left   = x;
+  |  566|      3|    x->parent = y;
+  |  567|      3|}
+  ------------------
+  | test_get_first_key_is_minimum.c:rotate_left:
+  |  548|      3|{
+  |  549|      3|    RBNode *y = x->right;
+  |  550|       |
+  |  551|      3|    x->right = y->left;
+  |  552|       |
+  |  553|      3|    if (y->left != table->sentinel)
+  |  554|      0|        y->left->parent = x;
+  |  555|       |
+  |  556|      3|    y->parent = x->parent;
+  |  557|       |
+  |  558|      3|    if (x->parent == table->sentinel)
+  |  559|      2|        table->root = y;
+  |  560|      1|    else if (x == x->parent->left)
+  |  561|      1|        x->parent->left = y;
+  |  562|      0|    else
+  |  563|      0|        x->parent->right = y;
+  |  564|       |
+  |  565|      3|    y->left   = x;
+  |  566|      3|    x->parent = y;
+  |  567|      3|}
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_absent_key_fails.c:rotate_left
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_internal_null_successor_branch.c:rotate_left
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_maximum_key_is_total.c:rotate_left
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_uses_right_subtree_minimum.c:rotate_left
+  ------------------
+  | Unexecuted instantiation: test_get_greater_than_walks_to_parent_successor.c:rotate_left
+  ------------------
+  | Unexecuted instantiation: test_get_inserted_key_returns_value.c:rotate_left
+  ------------------
+  | Unexecuted instantiation: test_get_missing_keys_fail.c:rotate_left
+  ------------------
+  568|       |
+  569|       |/**
+  570|       | * Returns a tree node associated with the specified key.
+  571|       | *
+  572|       | * @param[in] table the table on which this operation is performed
+  573|       | * @param[in] key the key being looked up
+  574|       | *
+  575|       | * @return tree node associated with the key
+  576|       | */
+  577|       |static RBNode *get_tree_node_by_key(TreeTable const * const table, const void *key)
+  578|     12|{
+  579|     12|    if (table->size == 0)
+  580|      2|        return NULL;
+  581|       |
+  582|     10|    RBNode *n = table->root;
+  583|     10|    RBNode *s = table->sentinel;
+  584|       |
+  585|     10|    int cmp;
+  586|     12|    do {
+  587|     12|        cmp = table->cmp(key, n->key);
+  588|       |
+  589|     12|        if (cmp < 0)
+  590|      3|            n = n->left;
+  591|      9|        else if (cmp > 0)
+  592|      3|            n = n->right;
+  593|      6|        else
+  594|      6|            return n;
+  595|     12|    } while (n != s && cmp != 0);
+                           ^6        ^2
+  596|       |
+  597|      4|    return NULL;
+  598|     10|}
+  ------------------
+  | test_add_duplicate_updates_value_only.c:get_tree_node_by_key:
+  |  578|      1|{
+  |  579|      1|    if (table->size == 0)
+  |  580|      0|        return NULL;
+  |  581|       |
+  |  582|      1|    RBNode *n = table->root;
+  |  583|      1|    RBNode *s = table->sentinel;
+  |  584|       |
+  |  585|      1|    int cmp;
+  |  586|      1|    do {
+  |  587|      1|        cmp = table->cmp(key, n->key);
+  |  588|       |
+  |  589|      1|        if (cmp < 0)
+  |  590|      0|            n = n->left;
+  |  591|      1|        else if (cmp > 0)
+  |  592|      0|            n = n->right;
+  |  593|      1|        else
+  |  594|      1|            return n;
+  |  595|      1|    } while (n != s && cmp != 0);
+  |                           ^0        ^0
+  |  596|       |
+  |  597|      0|    return NULL;
+  |  598|      1|}
+  ------------------
+  | Unexecuted instantiation: test_add_left_and_right_children.c:get_tree_node_by_key
+  ------------------
+  | Unexecuted instantiation: test_add_root_preserves_validity.c:get_tree_node_by_key
+  ------------------
+  | Unexecuted instantiation: test_add_three_symbolic_keys_preserves_validity.c:get_tree_node_by_key
+  ------------------
+  | Unexecuted instantiation: test_get_first_key_is_minimum.c:get_tree_node_by_key
+  ------------------
+  | test_get_greater_than_absent_key_fails.c:get_tree_node_by_key:
+  |  578|      2|{
+  |  579|      2|    if (table->size == 0)
+  |  580|      0|        return NULL;
+  |  581|       |
+  |  582|      2|    RBNode *n = table->root;
+  |  583|      2|    RBNode *s = table->sentinel;
+  |  584|       |
+  |  585|      2|    int cmp;
+  |  586|      2|    do {
+  |  587|      2|        cmp = table->cmp(key, n->key);
+  |  588|       |
+  |  589|      2|        if (cmp < 0)
+  |  590|      1|            n = n->left;
+  |  591|      1|        else if (cmp > 0)
+  |  592|      1|            n = n->right;
+  |  593|      0|        else
+  |  594|      0|            return n;
+  |  595|      2|    } while (n != s && cmp != 0);
+  |                                     ^0
+  |  596|       |
+  |  597|      2|    return NULL;
+  |  598|      2|}
+  ------------------
+  | test_get_greater_than_internal_null_successor_branch.c:get_tree_node_by_key:
+  |  578|      1|{
+  |  579|      1|    if (table->size == 0)
+  |  580|      0|        return NULL;
+  |  581|       |
+  |  582|      1|    RBNode *n = table->root;
+  |  583|      1|    RBNode *s = table->sentinel;
+  |  584|       |
+  |  585|      1|    int cmp;
+  |  586|      1|    do {
+  |  587|      1|        cmp = table->cmp(key, n->key);
+  |  588|       |
+  |  589|      1|        if (cmp < 0)
+  |  590|      0|            n = n->left;
+  |  591|      1|        else if (cmp > 0)
+  |  592|      0|            n = n->right;
+  |  593|      1|        else
+  |  594|      1|            return n;
+  |  595|      1|    } while (n != s && cmp != 0);
+  |                           ^0        ^0
+  |  596|       |
+  |  597|      0|    return NULL;
+  |  598|      1|}
+  ------------------
+  | test_get_greater_than_maximum_key_is_total.c:get_tree_node_by_key:
+  |  578|      1|{
+  |  579|      1|    if (table->size == 0)
+  |  580|      0|        return NULL;
+  |  581|       |
+  |  582|      1|    RBNode *n = table->root;
+  |  583|      1|    RBNode *s = table->sentinel;
+  |  584|       |
+  |  585|      1|    int cmp;
+  |  586|      2|    do {
+  |  587|      2|        cmp = table->cmp(key, n->key);
+  |  588|       |
+  |  589|      2|        if (cmp < 0)
+  |  590|      0|            n = n->left;
+  |  591|      2|        else if (cmp > 0)
+  |  592|      1|            n = n->right;
+  |  593|      1|        else
+  |  594|      1|            return n;
+  |  595|      2|    } while (n != s && cmp != 0);
+  |                           ^1        ^1
+  |  596|       |
+  |  597|      0|    return NULL;
+  |  598|      1|}
+  ------------------
+  | test_get_greater_than_uses_right_subtree_minimum.c:get_tree_node_by_key:
+  |  578|      1|{
+  |  579|      1|    if (table->size == 0)
+  |  580|      0|        return NULL;
+  |  581|       |
+  |  582|      1|    RBNode *n = table->root;
+  |  583|      1|    RBNode *s = table->sentinel;
+  |  584|       |
+  |  585|      1|    int cmp;
+  |  586|      1|    do {
+  |  587|      1|        cmp = table->cmp(key, n->key);
+  |  588|       |
+  |  589|      1|        if (cmp < 0)
+  |  590|      0|            n = n->left;
+  |  591|      1|        else if (cmp > 0)
+  |  592|      0|            n = n->right;
+  |  593|      1|        else
+  |  594|      1|            return n;
+  |  595|      1|    } while (n != s && cmp != 0);
+  |                           ^0        ^0
+  |  596|       |
+  |  597|      0|    return NULL;
+  |  598|      1|}
+  ------------------
+  | test_get_greater_than_walks_to_parent_successor.c:get_tree_node_by_key:
+  |  578|      1|{
+  |  579|      1|    if (table->size == 0)
+  |  580|      0|        return NULL;
+  |  581|       |
+  |  582|      1|    RBNode *n = table->root;
+  |  583|      1|    RBNode *s = table->sentinel;
+  |  584|       |
+  |  585|      1|    int cmp;
+  |  586|      2|    do {
+  |  587|      2|        cmp = table->cmp(key, n->key);
+  |  588|       |
+  |  589|      2|        if (cmp < 0)
+  |  590|      1|            n = n->left;
+  |  591|      1|        else if (cmp > 0)
+  |  592|      0|            n = n->right;
+  |  593|      1|        else
+  |  594|      1|            return n;
+  |  595|      2|    } while (n != s && cmp != 0);
+  |                           ^1        ^1
+  |  596|       |
+  |  597|      0|    return NULL;
+  |  598|      1|}
+  ------------------
+  | test_get_inserted_key_returns_value.c:get_tree_node_by_key:
+  |  578|      1|{
+  |  579|      1|    if (table->size == 0)
+  |  580|      0|        return NULL;
+  |  581|       |
+  |  582|      1|    RBNode *n = table->root;
+  |  583|      1|    RBNode *s = table->sentinel;
+  |  584|       |
+  |  585|      1|    int cmp;
+  |  586|      1|    do {
+  |  587|      1|        cmp = table->cmp(key, n->key);
+  |  588|       |
+  |  589|      1|        if (cmp < 0)
+  |  590|      0|            n = n->left;
+  |  591|      1|        else if (cmp > 0)
+  |  592|      0|            n = n->right;
+  |  593|      1|        else
+  |  594|      1|            return n;
+  |  595|      1|    } while (n != s && cmp != 0);
+  |                           ^0        ^0
+  |  596|       |
+  |  597|      0|    return NULL;
+  |  598|      1|}
+  ------------------
+  | test_get_missing_keys_fail.c:get_tree_node_by_key:
+  |  578|      4|{
+  |  579|      4|    if (table->size == 0)
+  |  580|      2|        return NULL;
+  |  581|       |
+  |  582|      2|    RBNode *n = table->root;
+  |  583|      2|    RBNode *s = table->sentinel;
+  |  584|       |
+  |  585|      2|    int cmp;
+  |  586|      2|    do {
+  |  587|      2|        cmp = table->cmp(key, n->key);
+  |  588|       |
+  |  589|      2|        if (cmp < 0)
+  |  590|      1|            n = n->left;
+  |  591|      1|        else if (cmp > 0)
+  |  592|      1|            n = n->right;
+  |  593|      0|        else
+  |  594|      0|            return n;
+  |  595|      2|    } while (n != s && cmp != 0);
+  |                                     ^0
+  |  596|       |
+  |  597|      2|    return NULL;
+  |  598|      2|}
+  ------------------
+  599|       |
+  600|       |/**
+  601|       | * Returns a successor node of the node <code>x</code>
+  602|       | *
+  603|       | * @param[in] table the table on which this operation is performed
+  604|       | * @param[in] x the node whose successor is being returned
+  605|       | *
+  606|       | * @return successor node of x
+  607|       | */
+  608|       |static RBNode *get_successor_node(TreeTable const * const table, RBNode *x)
+  609|      6|{
+  610|      6|    if (x == NULL)
+  611|      2|        return NULL;
+  612|       |
+  613|      4|    if (x->right != table->sentinel)
+  614|      1|        return tree_min(table, x->right);
+  615|       |
+  616|      3|    RBNode *y = x->parent;
+  617|       |
+  618|      4|    while (y != table->sentinel && x == y->right) {
+                                                 ^2
+  619|      1|        x = y;
+  620|      1|        y = y->parent;
+  621|      1|    }
+  622|      3|    return y;
+  623|      4|}
+  ------------------
+  | Unexecuted instantiation: test_add_duplicate_updates_value_only.c:get_successor_node
+  ------------------
+  | Unexecuted instantiation: test_add_left_and_right_children.c:get_successor_node
+  ------------------
+  | Unexecuted instantiation: test_add_root_preserves_validity.c:get_successor_node
+  ------------------
+  | Unexecuted instantiation: test_add_three_symbolic_keys_preserves_validity.c:get_successor_node
+  ------------------
+  | Unexecuted instantiation: test_get_first_key_is_minimum.c:get_successor_node
+  ------------------
+  | test_get_greater_than_absent_key_fails.c:get_successor_node:
+  |  609|      2|{
+  |  610|      2|    if (x == NULL)
+  |  611|      2|        return NULL;
+  |  612|       |
+  |  613|      0|    if (x->right != table->sentinel)
+  |  614|      0|        return tree_min(table, x->right);
+  |  615|       |
+  |  616|      0|    RBNode *y = x->parent;
+  |  617|       |
+  |  618|      0|    while (y != table->sentinel && x == y->right) {
+  |  619|      0|        x = y;
+  |  620|      0|        y = y->parent;
+  |  621|      0|    }
+  |  622|      0|    return y;
+  |  623|      0|}
+  ------------------
+  | test_get_greater_than_internal_null_successor_branch.c:get_successor_node:
+  |  609|      1|{
+  |  610|      1|    if (x == NULL)
+  |  611|      0|        return NULL;
+  |  612|       |
+  |  613|      1|    if (x->right != table->sentinel)
+  |  614|      0|        return tree_min(table, x->right);
+  |  615|       |
+  |  616|      1|    RBNode *y = x->parent;
+  |  617|       |
+  |  618|      1|    while (y != table->sentinel && x == y->right) {
+  |                                                 ^0
+  |  619|      0|        x = y;
+  |  620|      0|        y = y->parent;
+  |  621|      0|    }
+  |  622|      1|    return y;
+  |  623|      1|}
+  ------------------
+  | test_get_greater_than_maximum_key_is_total.c:get_successor_node:
+  |  609|      1|{
+  |  610|      1|    if (x == NULL)
+  |  611|      0|        return NULL;
+  |  612|       |
+  |  613|      1|    if (x->right != table->sentinel)
+  |  614|      0|        return tree_min(table, x->right);
+  |  615|       |
+  |  616|      1|    RBNode *y = x->parent;
+  |  617|       |
+  |  618|      2|    while (y != table->sentinel && x == y->right) {
+  |                                                 ^1
+  |  619|      1|        x = y;
+  |  620|      1|        y = y->parent;
+  |  621|      1|    }
+  |  622|      1|    return y;
+  |  623|      1|}
+  ------------------
+  | test_get_greater_than_uses_right_subtree_minimum.c:get_successor_node:
+  |  609|      1|{
+  |  610|      1|    if (x == NULL)
+  |  611|      0|        return NULL;
+  |  612|       |
+  |  613|      1|    if (x->right != table->sentinel)
+  |  614|      1|        return tree_min(table, x->right);
+  |  615|       |
+  |  616|      0|    RBNode *y = x->parent;
+  |  617|       |
+  |  618|      0|    while (y != table->sentinel && x == y->right) {
+  |  619|      0|        x = y;
+  |  620|      0|        y = y->parent;
+  |  621|      0|    }
+  |  622|      0|    return y;
+  |  623|      1|}
+  ------------------
+  | test_get_greater_than_walks_to_parent_successor.c:get_successor_node:
+  |  609|      1|{
+  |  610|      1|    if (x == NULL)
+  |  611|      0|        return NULL;
+  |  612|       |
+  |  613|      1|    if (x->right != table->sentinel)
+  |  614|      0|        return tree_min(table, x->right);
+  |  615|       |
+  |  616|      1|    RBNode *y = x->parent;
+  |  617|       |
+  |  618|      1|    while (y != table->sentinel && x == y->right) {
+  |  619|      0|        x = y;
+  |  620|      0|        y = y->parent;
+  |  621|      0|    }
+  |  622|      1|    return y;
+  |  623|      1|}
+  ------------------
+  | Unexecuted instantiation: test_get_inserted_key_returns_value.c:get_successor_node
+  ------------------
+  | Unexecuted instantiation: test_get_missing_keys_fail.c:get_successor_node
+  ------------------
+
+/home/klee/work/ex3/Ex3ConcTestSuite/test_add_duplicate_updates_value_only.c:
+    1|       |/*
+    2|       | * test_add_duplicate_updates_value_only.c — concrete test suite derived from KLEE output.
+    3|       | * Auto-generated by decode_klee.py — do not edit manually.
+    4|       | *
+    5|       | * Build (example):
+    6|       | *   clang -fprofile-instr-generate -fcoverage-mapping \
+    7|       | *         test_add_duplicate_updates_value_only.c ../../ex2/treetable.c \
+    8|       | *         -o test_add_duplicate_updates_value_only && ./test_add_duplicate_updates_value_only
+    9|       | */
+   10|       |#include <assert.h>
+   11|       |#include <stdio.h>
+   12|       |#include <stdlib.h>
+   13|       |#include "../../ex2/treetable.c"
+   14|       |
+   15|      1|static TreeTable *make_table_default(void) {
+   16|      1|    TreeTable *table = NULL;
+   17|      1|    TreeTableConf conf;
+   18|      1|    treetable_conf_init(&conf);
+   19|      1|    assert(treetable_new_conf(&conf, &table) == CC_OK);
+   20|      1|    return table;
+   21|      1|}
+   22|       |
+   23|       |/* case 1 — from test000001.ktest */
+   24|      1|static void test_add_duplicate_updates_value_only_case1(void) {
+   25|      1|        int key       = 0;
+   26|      1|        int old_value = 0;
+   27|      1|        int new_value = 0;
+   28|      1|        void *out     = NULL;
+   29|      1|        TreeTable *table = make_table_default();
+   30|      1|        assert(treetable_add(table, &key, &old_value) == CC_OK);
+   31|      1|        assert(treetable_add(table, &key, &new_value) == CC_OK);
+   32|      1|        assert(treetable_size(table) == 1);
+   33|      1|        assert(treetable_get(table, &key, &out) == CC_OK);
+   34|      1|        assert(out == &new_value);
+   35|      1|        assert(balanced(table));
+   36|      1|        assert(sorted(table));
+   37|      1|        treetable_destroy(table);
+   38|      1|}
+   39|       |
+   40|     12|int main(void) {
+   41|     12|    test_add_duplicate_updates_value_only_case1();
+   42|     12|    printf("test_add_duplicate_updates_value_only: %d case(s) passed.\n", 1);
+   43|     12|    return 0;
+   44|     12|}
+
+/home/klee/work/ex3/Ex3ConcTestSuite/test_add_left_and_right_children.c:
+    1|       |/*
+    2|       | * test_add_left_and_right_children.c — concrete test suite derived from KLEE output.
+    3|       | * Auto-generated by decode_klee.py — do not edit manually.
+    4|       | *
+    5|       | * Build (example):
+    6|       | *   clang -fprofile-instr-generate -fcoverage-mapping \
+    7|       | *         test_add_left_and_right_children.c ../../ex2/treetable.c \
+    8|       | *         -o test_add_left_and_right_children && ./test_add_left_and_right_children
+    9|       | */
+   10|       |#include <assert.h>
+   11|       |#include <stdio.h>
+   12|       |#include <stdlib.h>
+   13|       |#include "../../ex2/treetable.c"
+   14|       |
+   15|      2|static TreeTable *make_table_default(void) {
+   16|      2|    TreeTable *table = NULL;
+   17|      2|    TreeTableConf conf;
+   18|      2|    treetable_conf_init(&conf);
+   19|      2|    assert(treetable_new_conf(&conf, &table) == CC_OK);
+   20|      2|    return table;
+   21|      2|}
+   22|       |
+   23|       |/* case 1 — from test000001.ktest */
+   24|      1|static void test_add_left_and_right_children_case1(void) {
+   25|      1|        int k1 = 16777216, k2 = 0, v1 = 0, v2 = 0;
+   26|      1|        TreeTable *table = make_table_default();
+   27|      1|        assert(treetable_add(table, &k1, &v1) == CC_OK);
+   28|      1|        assert(treetable_add(table, &k2, &v2) == CC_OK);
+   29|      1|        assert(treetable_size(table) == 2);
+   30|      1|        assert(balanced(table));
+   31|      1|        assert(sorted(table));
+   32|      1|        treetable_destroy(table);
+   33|      1|}
+   34|       |
+   35|       |/* case 2 — from test000002.ktest */
+   36|      1|static void test_add_left_and_right_children_case2(void) {
+   37|      1|        int k1 = 0, k2 = 16777217, v1 = 0, v2 = 0;
+   38|      1|        TreeTable *table = make_table_default();
+   39|      1|        assert(treetable_add(table, &k1, &v1) == CC_OK);
+   40|      1|        assert(treetable_add(table, &k2, &v2) == CC_OK);
+   41|      1|        assert(treetable_size(table) == 2);
+   42|      1|        assert(balanced(table));
+   43|      1|        assert(sorted(table));
+   44|      1|        treetable_destroy(table);
+   45|      1|}
+   46|       |
+   47|     12|int main(void) {
+   48|     12|    test_add_left_and_right_children_case1();
+   49|     12|    test_add_left_and_right_children_case2();
+   50|     12|    printf("test_add_left_and_right_children: %d case(s) passed.\n", 2);
+   51|     12|    return 0;
+   52|     12|}
+
+/home/klee/work/ex3/Ex3ConcTestSuite/test_add_root_preserves_validity.c:
+    1|       |/*
+    2|       | * test_add_root_preserves_validity.c — concrete test suite derived from KLEE output.
+    3|       | * Auto-generated by decode_klee.py — do not edit manually.
+    4|       | *
+    5|       | * Build (example):
+    6|       | *   clang -fprofile-instr-generate -fcoverage-mapping \
+    7|       | *         test_add_root_preserves_validity.c ../../ex2/treetable.c \
+    8|       | *         -o test_add_root_preserves_validity && ./test_add_root_preserves_validity
+    9|       | */
+   10|       |#include <assert.h>
+   11|       |#include <stdio.h>
+   12|       |#include <stdlib.h>
+   13|       |#include "../../ex2/treetable.c"
+   14|       |
+   15|      1|static TreeTable *make_table_default(void) {
+   16|      1|    TreeTable *table = NULL;
+   17|      1|    TreeTableConf conf;
+   18|      1|    treetable_conf_init(&conf);
+   19|      1|    assert(treetable_new_conf(&conf, &table) == CC_OK);
+   20|      1|    return table;
+   21|      1|}
+   22|       |
+   23|       |/* case 1 — from test000001.ktest */
+   24|      1|static void test_add_root_preserves_validity_case1(void) {
+   25|      1|        int key   = 0;
+   26|      1|        int value = 0;
+   27|      1|        TreeTable *table = make_table_default();
+   28|      1|        assert(treetable_add(table, &key, &value) == CC_OK);
+   29|      1|        assert(treetable_size(table) == 1);
+   30|      1|        assert(balanced(table));
+   31|      1|        assert(sorted(table));
+   32|      1|        treetable_destroy(table);
+   33|      1|}
+   34|       |
+   35|     12|int main(void) {
+   36|     12|    test_add_root_preserves_validity_case1();
+   37|     12|    printf("test_add_root_preserves_validity: %d case(s) passed.\n", 1);
+   38|     12|    return 0;
+   39|     12|}
+
+/home/klee/work/ex3/Ex3ConcTestSuite/test_add_three_symbolic_keys_preserves_validity.c:
+    1|       |/*
+    2|       | * test_add_three_symbolic_keys_preserves_validity.c — concrete test suite derived from KLEE output.
+    3|       | * Auto-generated by decode_klee.py — do not edit manually.
+    4|       | *
+    5|       | * Build (example):
+    6|       | *   clang -fprofile-instr-generate -fcoverage-mapping \
+    7|       | *         test_add_three_symbolic_keys_preserves_validity.c ../../ex2/treetable.c \
+    8|       | *         -o test_add_three_symbolic_keys_preserves_validity && ./test_add_three_symbolic_keys_preserves_validity
+    9|       | */
+   10|       |#include <assert.h>
+   11|       |#include <stdio.h>
+   12|       |#include <stdlib.h>
+   13|       |#include "../../ex2/treetable.c"
+   14|       |
+   15|      6|static TreeTable *make_table_default(void) {
+   16|      6|    TreeTable *table = NULL;
+   17|      6|    TreeTableConf conf;
+   18|      6|    treetable_conf_init(&conf);
+   19|      6|    assert(treetable_new_conf(&conf, &table) == CC_OK);
+   20|      6|    return table;
+   21|      6|}
+   22|       |
+   23|       |/* case 1 — from test000001.ktest */
+   24|      1|static void test_add_three_symbolic_keys_preserves_validity_case1(void) {
+   25|      1|        int k1=65536, k2=16777216, k3=0;
+   26|      1|        int v1=0, v2=0, v3=0;
+   27|      1|        TreeTable *table = make_table_default();
+   28|      1|        assert(treetable_add(table, &k1, &v1) == CC_OK);
+   29|      1|        assert(treetable_add(table, &k2, &v2) == CC_OK);
+   30|      1|        assert(treetable_add(table, &k3, &v3) == CC_OK);
+   31|      1|        assert(treetable_size(table) == 3);
+   32|      1|        assert(balanced(table));
+   33|      1|        assert(sorted(table));
+   34|      1|        treetable_destroy(table);
+   35|      1|}
+   36|       |
+   37|       |/* case 2 — from test000002.ktest */
+   38|      1|static void test_add_three_symbolic_keys_preserves_validity_case2(void) {
+   39|      1|        int k1=-2147483647, k2=-2147483648, k3=0;
+   40|      1|        int v1=0, v2=0, v3=0;
+   41|      1|        TreeTable *table = make_table_default();
+   42|      1|        assert(treetable_add(table, &k1, &v1) == CC_OK);
+   43|      1|        assert(treetable_add(table, &k2, &v2) == CC_OK);
+   44|      1|        assert(treetable_add(table, &k3, &v3) == CC_OK);
+   45|      1|        assert(treetable_size(table) == 3);
+   46|      1|        assert(balanced(table));
+   47|      1|        assert(sorted(table));
+   48|      1|        treetable_destroy(table);
+   49|      1|}
+   50|       |
+   51|       |/* case 3 — from test000003.ktest */
+   52|      1|static void test_add_three_symbolic_keys_preserves_validity_case3(void) {
+   53|      1|        int k1=33554432, k2=16777216, k3=0;
+   54|      1|        int v1=0, v2=0, v3=0;
+   55|      1|        TreeTable *table = make_table_default();
+   56|      1|        assert(treetable_add(table, &k1, &v1) == CC_OK);
+   57|      1|        assert(treetable_add(table, &k2, &v2) == CC_OK);
+   58|      1|        assert(treetable_add(table, &k3, &v3) == CC_OK);
+   59|      1|        assert(treetable_size(table) == 3);
+   60|      1|        assert(balanced(table));
+   61|      1|        assert(sorted(table));
+   62|      1|        treetable_destroy(table);
+   63|      1|}
+   64|       |
+   65|       |/* case 4 — from test000004.ktest */
+   66|      1|static void test_add_three_symbolic_keys_preserves_validity_case4(void) {
+   67|      1|        int k1=-2147483640, k2=-1073741824, k3=0;
+   68|      1|        int v1=0, v2=0, v3=0;
+   69|      1|        TreeTable *table = make_table_default();
+   70|      1|        assert(treetable_add(table, &k1, &v1) == CC_OK);
+   71|      1|        assert(treetable_add(table, &k2, &v2) == CC_OK);
+   72|      1|        assert(treetable_add(table, &k3, &v3) == CC_OK);
+   73|      1|        assert(treetable_size(table) == 3);
+   74|      1|        assert(balanced(table));
+   75|      1|        assert(sorted(table));
+   76|      1|        treetable_destroy(table);
+   77|      1|}
+   78|       |
+   79|       |/* case 5 — from test000005.ktest */
+   80|      1|static void test_add_three_symbolic_keys_preserves_validity_case5(void) {
+   81|      1|        int k1=-1996488704, k2=16777216, k3=0;
+   82|      1|        int v1=0, v2=0, v3=0;
+   83|      1|        TreeTable *table = make_table_default();
+   84|      1|        assert(treetable_add(table, &k1, &v1) == CC_OK);
+   85|      1|        assert(treetable_add(table, &k2, &v2) == CC_OK);
+   86|      1|        assert(treetable_add(table, &k3, &v3) == CC_OK);
+   87|      1|        assert(treetable_size(table) == 3);
+   88|      1|        assert(balanced(table));
+   89|      1|        assert(sorted(table));
+   90|      1|        treetable_destroy(table);
+   91|      1|}
+   92|       |
+   93|       |/* case 6 — from test000006.ktest */
+   94|      1|static void test_add_three_symbolic_keys_preserves_validity_case6(void) {
+   95|      1|        int k1=61695, k2=-2147483648, k3=0;
+   96|      1|        int v1=0, v2=0, v3=0;
+   97|      1|        TreeTable *table = make_table_default();
+   98|      1|        assert(treetable_add(table, &k1, &v1) == CC_OK);
+   99|      1|        assert(treetable_add(table, &k2, &v2) == CC_OK);
+  100|      1|        assert(treetable_add(table, &k3, &v3) == CC_OK);
+  101|      1|        assert(treetable_size(table) == 3);
+  102|      1|        assert(balanced(table));
+  103|      1|        assert(sorted(table));
+  104|      1|        treetable_destroy(table);
+  105|      1|}
+  106|       |
+  107|     12|int main(void) {
+  108|     12|    test_add_three_symbolic_keys_preserves_validity_case1();
+  109|     12|    test_add_three_symbolic_keys_preserves_validity_case2();
+  110|     12|    test_add_three_symbolic_keys_preserves_validity_case3();
+  111|     12|    test_add_three_symbolic_keys_preserves_validity_case4();
+  112|     12|    test_add_three_symbolic_keys_preserves_validity_case5();
+  113|     12|    test_add_three_symbolic_keys_preserves_validity_case6();
+  114|     12|    printf("test_add_three_symbolic_keys_preserves_validity: %d case(s) passed.\n", 6);
+  115|     12|    return 0;
+  116|     12|}
+
+/home/klee/work/ex3/Ex3ConcTestSuite/test_get_first_key_is_minimum.c:
+    1|       |/*
+    2|       | * test_get_first_key_is_minimum.c — concrete test suite derived from KLEE output.
+    3|       | * Auto-generated by decode_klee.py — do not edit manually.
+    4|       | *
+    5|       | * Build (example):
+    6|       | *   clang -fprofile-instr-generate -fcoverage-mapping \
+    7|       | *         test_get_first_key_is_minimum.c ../../ex2/treetable.c \
+    8|       | *         -o test_get_first_key_is_minimum && ./test_get_first_key_is_minimum
+    9|       | */
+   10|       |#include <assert.h>
+   11|       |#include <stdio.h>
+   12|       |#include <stdlib.h>
+   13|       |#include "../../ex2/treetable.c"
+   14|       |
+   15|      6|static TreeTable *make_table_default(void) {
+   16|      6|    TreeTable *table = NULL;
+   17|      6|    TreeTableConf conf;
+   18|      6|    treetable_conf_init(&conf);
+   19|      6|    assert(treetable_new_conf(&conf, &table) == CC_OK);
+   20|      6|    return table;
+   21|      6|}
+   22|       |
+   23|       |/* case 1 — from test000001.ktest */
+   24|      1|static void test_get_first_key_is_minimum_case1(void) {
+   25|      1|        int k1=65536, k2=16777216, k3=0, val=0;
+   26|      1|        void *out = NULL;
+   27|      1|        TreeTable *table = make_table_default();
+   28|      1|        assert(treetable_add(table, &k1, &val) == CC_OK);
+   29|      1|        assert(treetable_add(table, &k2, &val) == CC_OK);
+   30|      1|        assert(treetable_add(table, &k3, &val) == CC_OK);
+   31|      1|        assert(treetable_get_first_key(table, &out) == CC_OK);
+   32|      1|        assert(*(int*)out <= k1 && *(int*)out <= k2 && *(int*)out <= k3);
+   33|      1|        treetable_destroy(table);
+   34|      1|}
+   35|       |
+   36|       |/* case 2 — from test000002.ktest */
+   37|      1|static void test_get_first_key_is_minimum_case2(void) {
+   38|      1|        int k1=-2147483647, k2=-2147483648, k3=0, val=0;
+   39|      1|        void *out = NULL;
+   40|      1|        TreeTable *table = make_table_default();
+   41|      1|        assert(treetable_add(table, &k1, &val) == CC_OK);
+   42|      1|        assert(treetable_add(table, &k2, &val) == CC_OK);
+   43|      1|        assert(treetable_add(table, &k3, &val) == CC_OK);
+   44|      1|        assert(treetable_get_first_key(table, &out) == CC_OK);
+   45|      1|        assert(*(int*)out <= k1 && *(int*)out <= k2 && *(int*)out <= k3);
+   46|      1|        treetable_destroy(table);
+   47|      1|}
+   48|       |
+   49|       |/* case 3 — from test000003.ktest */
+   50|      1|static void test_get_first_key_is_minimum_case3(void) {
+   51|      1|        int k1=33554432, k2=16777216, k3=0, val=0;
+   52|      1|        void *out = NULL;
+   53|      1|        TreeTable *table = make_table_default();
+   54|      1|        assert(treetable_add(table, &k1, &val) == CC_OK);
+   55|      1|        assert(treetable_add(table, &k2, &val) == CC_OK);
+   56|      1|        assert(treetable_add(table, &k3, &val) == CC_OK);
+   57|      1|        assert(treetable_get_first_key(table, &out) == CC_OK);
+   58|      1|        assert(*(int*)out <= k1 && *(int*)out <= k2 && *(int*)out <= k3);
+   59|      1|        treetable_destroy(table);
+   60|      1|}
+   61|       |
+   62|       |/* case 4 — from test000004.ktest */
+   63|      1|static void test_get_first_key_is_minimum_case4(void) {
+   64|      1|        int k1=-2147483640, k2=-1073741824, k3=0, val=0;
+   65|      1|        void *out = NULL;
+   66|      1|        TreeTable *table = make_table_default();
+   67|      1|        assert(treetable_add(table, &k1, &val) == CC_OK);
+   68|      1|        assert(treetable_add(table, &k2, &val) == CC_OK);
+   69|      1|        assert(treetable_add(table, &k3, &val) == CC_OK);
+   70|      1|        assert(treetable_get_first_key(table, &out) == CC_OK);
+   71|      1|        assert(*(int*)out <= k1 && *(int*)out <= k2 && *(int*)out <= k3);
+   72|      1|        treetable_destroy(table);
+   73|      1|}
+   74|       |
+   75|       |/* case 5 — from test000005.ktest */
+   76|      1|static void test_get_first_key_is_minimum_case5(void) {
+   77|      1|        int k1=61695, k2=-2147483648, k3=0, val=0;
+   78|      1|        void *out = NULL;
+   79|      1|        TreeTable *table = make_table_default();
+   80|      1|        assert(treetable_add(table, &k1, &val) == CC_OK);
+   81|      1|        assert(treetable_add(table, &k2, &val) == CC_OK);
+   82|      1|        assert(treetable_add(table, &k3, &val) == CC_OK);
+   83|      1|        assert(treetable_get_first_key(table, &out) == CC_OK);
+   84|      1|        assert(*(int*)out <= k1 && *(int*)out <= k2 && *(int*)out <= k3);
+   85|      1|        treetable_destroy(table);
+   86|      1|}
+   87|       |
+   88|       |/* case 6 — from test000006.ktest */
+   89|      1|static void test_get_first_key_is_minimum_case6(void) {
+   90|      1|        int k1=-1996488704, k2=16777216, k3=0, val=0;
+   91|      1|        void *out = NULL;
+   92|      1|        TreeTable *table = make_table_default();
+   93|      1|        assert(treetable_add(table, &k1, &val) == CC_OK);
+   94|      1|        assert(treetable_add(table, &k2, &val) == CC_OK);
+   95|      1|        assert(treetable_add(table, &k3, &val) == CC_OK);
+   96|      1|        assert(treetable_get_first_key(table, &out) == CC_OK);
+   97|      1|        assert(*(int*)out <= k1 && *(int*)out <= k2 && *(int*)out <= k3);
+   98|      1|        treetable_destroy(table);
+   99|      1|}
+  100|       |
+  101|     12|int main(void) {
+  102|     12|    test_get_first_key_is_minimum_case1();
+  103|     12|    test_get_first_key_is_minimum_case2();
+  104|     12|    test_get_first_key_is_minimum_case3();
+  105|     12|    test_get_first_key_is_minimum_case4();
+  106|     12|    test_get_first_key_is_minimum_case5();
+  107|     12|    test_get_first_key_is_minimum_case6();
+  108|     12|    printf("test_get_first_key_is_minimum: %d case(s) passed.\n", 6);
+  109|     12|    return 0;
+  110|     12|}
+
+/home/klee/work/ex3/Ex3ConcTestSuite/test_get_greater_than_absent_key_fails.c:
+    1|       |/*
+    2|       | * test_get_greater_than_absent_key_fails.c — concrete test suite derived from KLEE output.
+    3|       | * Auto-generated by decode_klee.py — do not edit manually.
+    4|       | *
+    5|       | * Build (example):
+    6|       | *   clang -fprofile-instr-generate -fcoverage-mapping \
+    7|       | *         test_get_greater_than_absent_key_fails.c ../../ex2/treetable.c \
+    8|       | *         -o test_get_greater_than_absent_key_fails && ./test_get_greater_than_absent_key_fails
+    9|       | */
+   10|       |#include <assert.h>
+   11|       |#include <stdio.h>
+   12|       |#include <stdlib.h>
+   13|       |#include "../../ex2/treetable.c"
+   14|       |
+   15|      2|static TreeTable *make_table_default(void) {
+   16|      2|    TreeTable *table = NULL;
+   17|      2|    TreeTableConf conf;
+   18|      2|    treetable_conf_init(&conf);
+   19|      2|    assert(treetable_new_conf(&conf, &table) == CC_OK);
+   20|      2|    return table;
+   21|      2|}
+   22|       |
+   23|       |/* case 1 — from test000001.ktest */
+   24|      1|static void test_get_greater_than_absent_key_fails_case1(void) {
+   25|      1|        int present=16777216, absent=0, value=0;
+   26|      1|        void *out = NULL;
+   27|      1|        TreeTable *table = make_table_default();
+   28|      1|        assert(treetable_add(table, &present, &value) == CC_OK);
+   29|      1|        assert(treetable_get_greater_than(table, &absent, &out) == CC_ERR_KEY_NOT_FOUND);
+   30|      1|        treetable_destroy(table);
+   31|      1|}
+   32|       |
+   33|       |/* case 2 — from test000002.ktest */
+   34|      1|static void test_get_greater_than_absent_key_fails_case2(void) {
+   35|      1|        int present=0, absent=16777217, value=0;
+   36|      1|        void *out = NULL;
+   37|      1|        TreeTable *table = make_table_default();
+   38|      1|        assert(treetable_add(table, &present, &value) == CC_OK);
+   39|      1|        assert(treetable_get_greater_than(table, &absent, &out) == CC_ERR_KEY_NOT_FOUND);
+   40|      1|        treetable_destroy(table);
+   41|      1|}
+   42|       |
+   43|     12|int main(void) {
+   44|     12|    test_get_greater_than_absent_key_fails_case1();
+   45|     12|    test_get_greater_than_absent_key_fails_case2();
+   46|     12|    printf("test_get_greater_than_absent_key_fails: %d case(s) passed.\n", 2);
+   47|     12|    return 0;
+   48|     12|}
+
+/home/klee/work/ex3/Ex3ConcTestSuite/test_get_greater_than_internal_null_successor_branch.c:
+    1|       |/*
+    2|       | * test_get_greater_than_internal_null_successor_branch.c — concrete test suite derived from KLEE output.
+    3|       | * Auto-generated by decode_klee.py — do not edit manually.
+    4|       | *
+    5|       | * Build (example):
+    6|       | *   clang -fprofile-instr-generate -fcoverage-mapping \
+    7|       | *         test_get_greater_than_internal_null_successor_branch.c ../../ex2/treetable.c \
+    8|       | *         -o test_get_greater_than_internal_null_successor_branch && ./test_get_greater_than_internal_null_successor_branch
+    9|       | */
+   10|       |#include <assert.h>
+   11|       |#include <stdio.h>
+   12|       |#include <stdlib.h>
+   13|       |#include "../../ex2/treetable.c"
+   14|       |
+   15|      0|static TreeTable *make_table_default(void) {
+   16|      0|    TreeTable *table = NULL;
+   17|      0|    TreeTableConf conf;
+   18|      0|    treetable_conf_init(&conf);
+   19|      0|    assert(treetable_new_conf(&conf, &table) == CC_OK);
+   20|      0|    return table;
+   21|      0|}
+   22|       |
+   23|       |/* case 1 — from test000001.ktest */
+   24|      1|static void test_get_greater_than_internal_null_successor_branch_case1(void) {
+   25|      1|        TreeTable table; RBNode node;
+   26|      1|        int key=0, value=0;
+   27|      1|        void *out = NULL;
+   28|      1|        table.root=&node; table.sentinel=NULL; table.size=1;
+   29|      1|        table.cmp=cmp; table.mem_alloc=malloc;
+   30|      1|        table.mem_calloc=calloc; table.mem_free=free;
+   31|      1|        node.key=&key; node.value=&value; node.color=RB_BLACK;
+   32|      1|        node.parent=NULL; node.left=NULL; node.right=NULL;
+   33|      1|        assert(treetable_get_greater_than(&table, &key, &out) == CC_ERR_KEY_NOT_FOUND);
+   34|      1|}
+   35|       |
+   36|     12|int main(void) {
+   37|     12|    test_get_greater_than_internal_null_successor_branch_case1();
+   38|     12|    printf("test_get_greater_than_internal_null_successor_branch: %d case(s) passed.\n", 1);
+   39|     12|    return 0;
+   40|     12|}
+
+/home/klee/work/ex3/Ex3ConcTestSuite/test_get_greater_than_maximum_key_is_total.c:
+    1|       |/*
+    2|       | * test_get_greater_than_maximum_key_is_total.c — concrete test suite derived from KLEE output.
+    3|       | * Auto-generated by decode_klee.py — do not edit manually.
+    4|       | *
+    5|       | * Build (example):
+    6|       | *   clang -fprofile-instr-generate -fcoverage-mapping \
+    7|       | *         test_get_greater_than_maximum_key_is_total.c ../../ex2/treetable.c \
+    8|       | *         -o test_get_greater_than_maximum_key_is_total && ./test_get_greater_than_maximum_key_is_total
+    9|       | */
+   10|       |#include <assert.h>
+   11|       |#include <stdio.h>
+   12|       |#include <stdlib.h>
+   13|       |#include "../../ex2/treetable.c"
+   14|       |
+   15|      1|static TreeTable *make_table_default(void) {
+   16|      1|    TreeTable *table = NULL;
+   17|      1|    TreeTableConf conf;
+   18|      1|    treetable_conf_init(&conf);
+   19|      1|    assert(treetable_new_conf(&conf, &table) == CC_OK);
+   20|      1|    return table;
+   21|      1|}
+   22|       |
+   23|       |/* case 1 — from test000001.ktest */
+   24|      1|static void test_get_greater_than_maximum_key_is_total_case1(void) {
+   25|      1|        int k1=10, k2=20, value=0;
+   26|      1|        void *out = NULL;
+   27|      1|        enum cc_stat status;
+   28|      1|        TreeTable *table = make_table_default();
+   29|      1|        assert(treetable_add(table, &k1, &value) == CC_OK);
+   30|      1|        assert(treetable_add(table, &k2, &value) == CC_OK);
+   31|      1|        status = treetable_get_greater_than(table, &k2, &out);
+   32|      1|        assert(status == CC_OK || status == CC_ERR_KEY_NOT_FOUND);
+   33|      1|        assert(balanced(table));
+   34|      1|        assert(sorted(table));
+   35|      1|        treetable_destroy(table);
+   36|      1|}
+   37|       |
+   38|     12|int main(void) {
+   39|     12|    test_get_greater_than_maximum_key_is_total_case1();
+   40|     12|    printf("test_get_greater_than_maximum_key_is_total: %d case(s) passed.\n", 1);
+   41|     12|    return 0;
+   42|     12|}
+
+/home/klee/work/ex3/Ex3ConcTestSuite/test_get_greater_than_uses_right_subtree_minimum.c:
+    1|       |/*
+    2|       | * test_get_greater_than_uses_right_subtree_minimum.c — concrete test suite derived from KLEE output.
+    3|       | * Auto-generated by decode_klee.py — do not edit manually.
+    4|       | *
+    5|       | * Build (example):
+    6|       | *   clang -fprofile-instr-generate -fcoverage-mapping \
+    7|       | *         test_get_greater_than_uses_right_subtree_minimum.c ../../ex2/treetable.c \
+    8|       | *         -o test_get_greater_than_uses_right_subtree_minimum && ./test_get_greater_than_uses_right_subtree_minimum
+    9|       | */
+   10|       |#include <assert.h>
+   11|       |#include <stdio.h>
+   12|       |#include <stdlib.h>
+   13|       |#include "../../ex2/treetable.c"
+   14|       |
+   15|      1|static TreeTable *make_table_default(void) {
+   16|      1|    TreeTable *table = NULL;
+   17|      1|    TreeTableConf conf;
+   18|      1|    treetable_conf_init(&conf);
+   19|      1|    assert(treetable_new_conf(&conf, &table) == CC_OK);
+   20|      1|    return table;
+   21|      1|}
+   22|       |
+   23|       |/* case 1 — from test000001.ktest */
+   24|      1|static void test_get_greater_than_uses_right_subtree_minimum_case1(void) {
+   25|      1|        int k1=10, k2=20, k3=30, value=0;
+   26|      1|        void *out = NULL;
+   27|      1|        TreeTable *table = make_table_default();
+   28|      1|        assert(treetable_add(table, &k2, &value) == CC_OK);
+   29|      1|        assert(treetable_add(table, &k1, &value) == CC_OK);
+   30|      1|        assert(treetable_add(table, &k3, &value) == CC_OK);
+   31|      1|        assert(treetable_get_greater_than(table, &k2, &out) == CC_OK);
+   32|      1|        assert(*(int*)out == k3);
+   33|      1|        treetable_destroy(table);
+   34|      1|}
+   35|       |
+   36|     12|int main(void) {
+   37|     12|    test_get_greater_than_uses_right_subtree_minimum_case1();
+   38|     12|    printf("test_get_greater_than_uses_right_subtree_minimum: %d case(s) passed.\n", 1);
+   39|     12|    return 0;
+   40|     12|}
+
+/home/klee/work/ex3/Ex3ConcTestSuite/test_get_greater_than_walks_to_parent_successor.c:
+    1|       |/*
+    2|       | * test_get_greater_than_walks_to_parent_successor.c — concrete test suite derived from KLEE output.
+    3|       | * Auto-generated by decode_klee.py — do not edit manually.
+    4|       | *
+    5|       | * Build (example):
+    6|       | *   clang -fprofile-instr-generate -fcoverage-mapping \
+    7|       | *         test_get_greater_than_walks_to_parent_successor.c ../../ex2/treetable.c \
+    8|       | *         -o test_get_greater_than_walks_to_parent_successor && ./test_get_greater_than_walks_to_parent_successor
+    9|       | */
+   10|       |#include <assert.h>
+   11|       |#include <stdio.h>
+   12|       |#include <stdlib.h>
+   13|       |#include "../../ex2/treetable.c"
+   14|       |
+   15|      1|static TreeTable *make_table_default(void) {
+   16|      1|    TreeTable *table = NULL;
+   17|      1|    TreeTableConf conf;
+   18|      1|    treetable_conf_init(&conf);
+   19|      1|    assert(treetable_new_conf(&conf, &table) == CC_OK);
+   20|      1|    return table;
+   21|      1|}
+   22|       |
+   23|       |/* case 1 — from test000001.ktest */
+   24|      1|static void test_get_greater_than_walks_to_parent_successor_case1(void) {
+   25|      1|        int k1=10, k2=20, value=0;
+   26|      1|        void *out = NULL;
+   27|      1|        TreeTable *table = make_table_default();
+   28|      1|        assert(treetable_add(table, &k2, &value) == CC_OK);
+   29|      1|        assert(treetable_add(table, &k1, &value) == CC_OK);
+   30|      1|        assert(treetable_get_greater_than(table, &k1, &out) == CC_OK);
+   31|      1|        assert(*(int*)out == k2);
+   32|      1|        treetable_destroy(table);
+   33|      1|}
+   34|       |
+   35|     12|int main(void) {
+   36|     12|    test_get_greater_than_walks_to_parent_successor_case1();
+   37|     12|    printf("test_get_greater_than_walks_to_parent_successor: %d case(s) passed.\n", 1);
+   38|     12|    return 0;
+   39|     12|}
+
+/home/klee/work/ex3/Ex3ConcTestSuite/test_get_inserted_key_returns_value.c:
+    1|       |/*
+    2|       | * test_get_inserted_key_returns_value.c — concrete test suite derived from KLEE output.
+    3|       | * Auto-generated by decode_klee.py — do not edit manually.
+    4|       | *
+    5|       | * Build (example):
+    6|       | *   clang -fprofile-instr-generate -fcoverage-mapping \
+    7|       | *         test_get_inserted_key_returns_value.c ../../ex2/treetable.c \
+    8|       | *         -o test_get_inserted_key_returns_value && ./test_get_inserted_key_returns_value
+    9|       | */
+   10|       |#include <assert.h>
+   11|       |#include <stdio.h>
+   12|       |#include <stdlib.h>
+   13|       |#include "../../ex2/treetable.c"
+   14|       |
+   15|      1|static TreeTable *make_table_default(void) {
+   16|      1|    TreeTable *table = NULL;
+   17|      1|    TreeTableConf conf;
+   18|      1|    treetable_conf_init(&conf);
+   19|      1|    assert(treetable_new_conf(&conf, &table) == CC_OK);
+   20|      1|    return table;
+   21|      1|}
+   22|       |
+   23|       |/* case 1 — from test000001.ktest */
+   24|      1|static void test_get_inserted_key_returns_value_case1(void) {
+   25|      1|        int key = 0, value = 0;
+   26|      1|        void *out = NULL;
+   27|      1|        TreeTable *table = make_table_default();
+   28|      1|        assert(treetable_add(table, &key, &value) == CC_OK);
+   29|      1|        assert(treetable_get(table, &key, &out) == CC_OK);
+   30|      1|        assert(out == &value);
+   31|      1|        treetable_destroy(table);
+   32|      1|}
+   33|       |
+   34|     12|int main(void) {
+   35|     12|    test_get_inserted_key_returns_value_case1();
+   36|     12|    printf("test_get_inserted_key_returns_value: %d case(s) passed.\n", 1);
+   37|     12|    return 0;
+   38|     12|}
+
+/home/klee/work/ex3/Ex3ConcTestSuite/test_get_missing_keys_fail.c:
+    1|       |/*
+    2|       | * test_get_missing_keys_fail.c — concrete test suite derived from KLEE output.
+    3|       | * Auto-generated by decode_klee.py — do not edit manually.
+    4|       | *
+    5|       | * Build (example):
+    6|       | *   clang -fprofile-instr-generate -fcoverage-mapping \
+    7|       | *         test_get_missing_keys_fail.c ../../ex2/treetable.c \
+    8|       | *         -o test_get_missing_keys_fail && ./test_get_missing_keys_fail
+    9|       | */
+   10|       |#include <assert.h>
+   11|       |#include <stdio.h>
+   12|       |#include <stdlib.h>
+   13|       |#include "../../ex2/treetable.c"
+   14|       |
+   15|      2|static TreeTable *make_table_default(void) {
+   16|      2|    TreeTable *table = NULL;
+   17|      2|    TreeTableConf conf;
+   18|      2|    treetable_conf_init(&conf);
+   19|      2|    assert(treetable_new_conf(&conf, &table) == CC_OK);
+   20|      2|    return table;
+   21|      2|}
+   22|       |
+   23|       |/* case 1 — from test000001.ktest */
+   24|      1|static void test_get_missing_keys_fail_case1(void) {
+   25|      1|        int absent_empty = 0, present = 16777216;
+   26|      1|        int absent_ne    = 0, value  = 0;
+   27|      1|        void *out = NULL;
+   28|      1|        TreeTable *table = make_table_default();
+   29|      1|        assert(treetable_get(table, &absent_empty, &out) == CC_ERR_KEY_NOT_FOUND);
+   30|      1|        assert(treetable_add(table, &present, &value) == CC_OK);
+   31|      1|        assert(treetable_get(table, &absent_ne, &out) == CC_ERR_KEY_NOT_FOUND);
+   32|      1|        treetable_destroy(table);
+   33|      1|}
+   34|       |
+   35|       |/* case 2 — from test000002.ktest */
+   36|      1|static void test_get_missing_keys_fail_case2(void) {
+   37|      1|        int absent_empty = 0, present = 0;
+   38|      1|        int absent_ne    = 16777217, value  = 0;
+   39|      1|        void *out = NULL;
+   40|      1|        TreeTable *table = make_table_default();
+   41|      1|        assert(treetable_get(table, &absent_empty, &out) == CC_ERR_KEY_NOT_FOUND);
+   42|      1|        assert(treetable_add(table, &present, &value) == CC_OK);
+   43|      1|        assert(treetable_get(table, &absent_ne, &out) == CC_ERR_KEY_NOT_FOUND);
+   44|      1|        treetable_destroy(table);
+   45|      1|}
+   46|       |
+   47|     12|int main(void) {
+   48|     12|    test_get_missing_keys_fail_case1();
+   49|     12|    test_get_missing_keys_fail_case2();
+   50|     12|    printf("test_get_missing_keys_fail: %d case(s) passed.\n", 2);
+   51|     12|    return 0;
+   52|     12|}
+
