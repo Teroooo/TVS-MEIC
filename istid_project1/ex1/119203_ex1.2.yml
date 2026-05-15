@@ -1,0 +1,152 @@
+# Exercise 1.2 - Manual Bug Identification Report
+# File analyzed: hashmap.c
+# Tools used: Infer (--pulse) and Clang Analyzer (scan-build)
+# Legend: tp = found by tool, fn = NOT found by any tool (false negative)
+
+report:
+  # ── FOUND BY TOOLS (TP) ─────────────────────────────────────────────────────
+
+  - bug:
+      type: Null Dereference
+      lineno: 61
+      class: tp
+      description: |
+        Found by Infer (line 76) and Clang Analyzer (line 72).
+        In function `hashmap_new`, `map` is allocated via malloc on line 61
+        but its return value is never checked for NULL. If malloc fails,
+        `map` is NULL and the dereference `map->size = size` on line 76
+        causes a segmentation fault.
+
+  - bug:
+      type: Null Dereference
+      lineno: 63
+      class: tp
+      description: |
+        Found by Clang Analyzer (line 72).
+        In function `hashmap_new`, `fields` is allocated via malloc on
+        lines 63-64. The check on line 66 (`if (!fields)`) frees `map`
+        but does NOT return. Execution falls through into the for loop on
+        line 70, where `field = &fields[i]` dereferences the NULL `fields`
+        pointer on line 72, causing a crash.
+
+  - bug:
+      type: Null Dereference
+      lineno: 155
+      class: tp
+      description: |
+        Found by Infer (line 156).
+        In function `hashmap_get`, `val` is allocated via malloc on line 155
+        but is not checked for NULL. If malloc fails, `val` is NULL and
+        `memcpy(val, entry->val, entry->len)` on line 156 dereferences it,
+        causing undefined behavior.
+
+  - bug:
+      type: Memory Leak
+      lineno: 131
+      class: tp
+      description: |
+        Found by Infer (line 130).
+        In function `hashmap_set`, `val` is allocated via malloc on line 131.
+        When the goto `set_val` path is taken (updating an existing key),
+        the old `entry->val` is freed on line 108 but the new `val` can
+        leak if an error occurs. The goto pattern makes memory ownership
+        difficult to track.
+
+  - bug:
+      type: Memory Leak
+      lineno: 155
+      class: tp
+      description: |
+        Found by Infer (line 156) and Clang Analyzer (line 170).
+        In function `hashmap_get`, `val` is malloc'd on line 155 and
+        returned to the caller via memcpy. There is no documented contract
+        requiring the caller to free it. In `main`, `ret` (line 169) is
+        never freed before the function returns, leaking the memory.
+
+  - bug:
+      type: Nullptr Dereference
+      lineno: 163
+      class: tp
+      description: |
+        Found by Infer (line 163).
+        In `main`, the return value of `hashmap_new(8)` is used directly
+        without checking for NULL. Since `hashmap_new` can return NULL
+        (if malloc fails), any subsequent use of `map` is a null dereference.
+
+  - bug:
+      type: Bad Malloc Size
+      lineno: 124
+      class: tp
+      description: |
+        Found by Clang Analyzer (unix.MallocSizeof, line 124).
+        In function `hashmap_set`, `entry->key` is allocated with
+        `malloc(sizeof(key))`. Since `key` is a `char*`, `sizeof(key)`
+        returns the size of a pointer (8 bytes on 64-bit), NOT the length
+        of the string. This buffer is almost always too small, causing a
+        buffer overflow when the key is copied on line 125.
+
+  - bug:
+      type: Buffer Overflow (strcpy)
+      lineno: 125
+      class: tp
+      description: |
+        Found by Clang Analyzer (security.insecureAPI.strcpy, line 125).
+        `strcpy(entry->key, key)` performs an unbounded copy with no
+        length check. Combined with the wrong malloc size on line 124,
+        this is a confirmed buffer overflow. Even with correct sizing,
+        strcpy is unsafe as it provides no boundary protection.
+
+  # ── NOT FOUND BY ANY TOOL (FN) ──────────────────────────────────────────────
+
+  - bug:
+      type: Use-After-Free
+      lineno: 67
+      class: fn
+      description: |
+        Not found by any tool.
+        In function `hashmap_new`, if `fields` malloc fails (line 63),
+        the code enters the `if (!fields)` block and frees `map` on
+        line 67 — but does NOT return. Execution continues to line 76
+        where `map->size = size` accesses the already-freed `map`, which
+        is a use-after-free. Note: Infer flagged line 76 as a null
+        dereference (map could be NULL from its own malloc), but neither
+        tool detected this specific use-after-free path where map is
+        explicitly freed and then dereferenced.
+
+  - bug:
+      type: Null Dereference
+      lineno: 118
+      class: fn
+      description: |
+        Not found by any tool.
+        In function `hashmap_set`, `entries` is allocated via malloc on
+        lines 118-119 but its return value is never checked for NULL.
+        If malloc fails, `entries` is NULL and `memcpy(entries, ...)` on
+        line 120 immediately dereferences it, causing a crash. Neither
+        Infer nor Clang Analyzer flagged this specific path.
+
+  - bug:
+      type: Memory Leak
+      lineno: 127
+      class: fn
+      description: |
+        Not found by any tool.
+        In function `hashmap_set`, when adding a new entry to a bucket that
+        already has entries, a new `entries` array is malloc'd (line 118),
+        the old entries are copied into it, and then `field->entries` is
+        replaced on line 127 — without freeing the old pointer. Every time
+        a hash bucket grows beyond its first element, the previous allocation
+        is lost, causing a memory leak.
+
+  - bug:
+      type: Null Dereference / Memory Leak (realloc)
+      lineno: 141
+      class: fn
+      description: |
+        Not found by any tool.
+        In function `hashmap_set`, `realloc` is called on line 141 and
+        its return value is stored directly back into `field->entries`
+        without checking for NULL. If realloc fails, it returns NULL and
+        the original memory block is NOT freed — it is lost, causing a
+        memory leak. Subsequently, `field->entries` is NULL, which will
+        cause a null dereference on the next access to the field's entries.
