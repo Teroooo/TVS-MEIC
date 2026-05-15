@@ -159,6 +159,7 @@ void *hashmap_get(hashmap_t map, char *key) {
   return NULL;
 }
 
+#ifndef DRIVER_MAIN
 int main() {
   hashmap_t map = hashmap_new(8);
 
@@ -172,3 +173,4 @@ int main() {
   hashmap_free(map);
   return 0;
 }
+#endif
