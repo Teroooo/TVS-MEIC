@@ -1,0 +1,27 @@
+
+plugins {
+	id 'java'
+	id 'application'
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_17
+	targetCompatibility = JavaVersion.VERSION_17
+}
+
+group = 'supereats'
+version = '1.0-SNAPSHOT'
+
+repositories {
+	mavenCentral()
+}
+
+dependencies {
+	testImplementation 'org.testng:testng:7.10.2'
+	implementation 'org.openjfx:javafx-base:21.0.2'
+}
+
+test {
+	useTestNG()
+}
+
