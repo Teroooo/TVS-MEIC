@@ -22,6 +22,9 @@ dependencies {
 }
 
 test {
-	useTestNG()
+    useTestNG()
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat = "full"
+    }
 }
-

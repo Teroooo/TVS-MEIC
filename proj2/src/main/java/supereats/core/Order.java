@@ -71,18 +71,27 @@ public class Order {
     }
 
     public void removeItem(Item item, int quantity) {
-        List<Item> itemsList = items.stream().map(Pair::first).collect(Collectors.toList());
-        if (itemsList.contains(item)) {
-            int index = itemsList.indexOf(item);
-            int currentQuantity = items.get(index).second();
-            if (quantity >= currentQuantity) {
-                items.remove(index);
-                this.totalWeight -= item.weight() * currentQuantity;
-            } else {
-                items.get(index).setSecond(currentQuantity - quantity);
-                this.totalWeight -= item.weight() * quantity;
-            }
+        if (quantity < 1) {
+            throw new InvalidOperationException("Quantity to remove must be positive.");
         }
+
+        List<Item> itemsList = items.stream().map(Pair::first).collect(Collectors.toList());
+        if (!itemsList.contains(item)) {
+            throw new InvalidOperationException("Item is not present in the order.");
+        }
+
+        int index = itemsList.indexOf(item);
+        int currentQuantity = items.get(index).second();
+        if (quantity > currentQuantity) {
+            throw new InvalidOperationException("Removing this quantity would make the item quantity invalid.");
+        }
+
+        if (quantity == currentQuantity) {
+            items.remove(index);
+        } else {
+            items.get(index).setSecond(currentQuantity - quantity);
+        }
+        this.totalWeight -= item.weight() * quantity;
     }
 
     public void setAddress(String newDeliveryAddress, int distance) {
@@ -139,7 +148,7 @@ public class Order {
             } else {
                 return 0.0;
             }
-        } else if (distance >= 5000 && distance < 15000) {
+        } else if (distance >= 5000 && distance <= 15000) {
             if (cost > 150) {
                 return 1.0;
             } else if (cost >= 75 && cost <= 150) {
@@ -151,7 +160,7 @@ public class Order {
                     return 4.0;
                 }
             }
-        } else if (distance >= 15000 && distance <= 20000) {
+        } else if (distance > 15000 && distance <= 20000) {
             if (cost > 500) {
                 return 1.0;
             } else if (cost >= 300 && cost <= 500) {

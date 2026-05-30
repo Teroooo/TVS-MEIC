@@ -1,7 +1,70 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="supereats.core.OrderTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-05-27T13:38:04.217Z" hostname="DESKTOP-RRSF36O" time="0.086">
+<testsuite name="supereats.core.OrderTest" tests="64" skipped="0" failures="0" errors="0" timestamp="2026-05-30T17:05:41.074Z" hostname="Antonios-MacBook-Pro.local" time="0.015">
   <properties/>
-  <testcase name="testAddItem" classname="supereats.core.OrderTest" time="0.086"/>
+  <testcase name="testAddItem" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testAddItemAndOverRemove" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testAddItemAndRemoveAfter" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testAddItemAndRemoveAll" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testAddItemLessThanOne" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testAddItemMoreThanTen" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testAddItemOne" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testAddItemTen" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testAddItemTwoTimes" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testAddItemTwoTimesAboveTenThrowsAndPreservesState" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testAddItemsFromDifferentSuppliers" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testAddressAboveTwentyKM" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testAddressAtTwentyKM" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDecisionTable[0](below5_costBelow75_quantityExactly10, 4999, [[I@2663e964, 3.0)" classname="supereats.core.OrderTest" time="0.001"/>
+  <testcase name="testComputeDeliveryCostDecisionTable[1](below5_costBelow75_quantityAbove10, 4999, [[I@189cbd7c, 5.0)" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDecisionTable[2](below5_costExactly75, 4999, [[I@42e25b0b, 0.0)" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDecisionTable[3](exactly5_costBelow75_quantityExactly5, 5000, [[I@44be0077, 4.0)" classname="supereats.core.OrderTest" time="0.001"/>
+  <testcase name="testComputeDeliveryCostDecisionTable[4](exactly5_costBelow75_quantityAbove5, 5000, [[I@72ef8d15, 6.0)" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDecisionTable[5](exactly5_costExactly150, 5000, [[I@5e21e98f, 3.0)" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDecisionTable[6](exactly5_costAbove150, 5000, [[I@5f20155b, 1.0)" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDecisionTable[7](between5And15_costExactly75, 14999, [[I@239105a8, 3.0)" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDecisionTable[8](exactly15_usesMiddleDistanceBranch, 15000, [[I@609bcfb6, 1.0)" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDecisionTable[9](above15_costExactly300_weightBelow5kg, 15001, [[I@560348e6, 3.0)" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDecisionTable[10](above15_costExactly500_weightExactly5kg, 15001, [[I@23202fce, 5.0)" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDecisionTable[11](exactly20_costAbove500, 20000, [[I@37911f88, 1.0)" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDecisionTable[12](exactly20_costBelow300_weightBelow3kg, 20000, [[I@4d6025c5, 7.0)" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDecisionTable[13](exactly20_costBelow300_weightExactly3kg_quantityBelow8, 20000, [[I@407a7f2a, 8.0)" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDecisionTable[14](exactly20_costBelow300_weightExactly3kg_quantityExactly8, 20000, [[I@2a7ed1f, 10.0)" classname="supereats.core.OrderTest" time="0.001"/>
+  <testcase name="testComputeDeliveryCostDistanceAboveFifteenAndUpToTwentyAndCostBetweenThreeHundredAndFiveHundredWithWeightAtLeastFiveKg" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceAboveFifteenAndUpToTwentyAndCostBetweenThreeHundredAndFiveHundredWithWeightAtLeastFiveKg2" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceAboveFifteenAndUpToTwentyAndCostBetweenThreeHundredAndFiveHundredWithWeightLessThanFiveKg" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceAboveFifteenAndUpToTwentyAndCostBetweenThreeHundredAndFiveHundredWithWeightLessThanFiveKg2" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceAboveFifteenAndUpToTwentyAndCostExceedsFiveHundred" classname="supereats.core.OrderTest" time="0.001"/>
+  <testcase name="testComputeDeliveryCostDistanceAboveFifteenAndUpToTwentyAndCostExceedsFiveHundred2" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceAboveFifteenAndUpToTwentyAndCostLessThanThreeHundredWithWeightAtLeastThreeKgAndAtLeastEightUnits" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceAboveFifteenAndUpToTwentyAndCostLessThanThreeHundredWithWeightAtLeastThreeKgAndAtLeastEightUnits2" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceAboveFifteenAndUpToTwentyAndCostLessThanThreeHundredWithWeightAtLeastThreeKgAndLessThanEightUnits" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceAboveFifteenAndUpToTwentyAndCostLessThanThreeHundredWithWeightAtLeastThreeKgAndLessThanEightUnits2" classname="supereats.core.OrderTest" time="0.001"/>
+  <testcase name="testComputeDeliveryCostDistanceAboveFifteenAndUpToTwentyAndCostLessThanThreeHundredWithWeightLessThanThreeKg" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceAboveFifteenAndUpToTwentyAndCostLessThanThreeHundredWithWeightLessThanThreeKg2" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceBelowFiveKmAndCostAtLeastSeventyFive" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceBelowFiveKmAndCostAtLeastSeventyFive2" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceBelowFiveKmAndCostAtLeastSeventyFive3" classname="supereats.core.OrderTest" time="0.001"/>
+  <testcase name="testComputeDeliveryCostDistanceBelowFiveKmAndCostLessSeventyFive" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceBelowFiveKmAndCostLessSeventyFiveAndMoreThanTenItems" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceBetweenFiveAndFifteenAndCostBelowSeventyFiveAndQuantityBelowFive" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceBetweenFiveAndFifteenAndCostBelowSeventyFiveAndQuantityBelowFive2" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceBetweenFiveAndFifteenAndCostBelowSeventyFiveAndQuantityExceedsFive" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceBetweenFiveAndFifteenAndCostBelowSeventyFiveAndQuantityExceedsFive2" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceBetweenFiveAndFifteenAndCostBetweenSeventyFiveAndOneHundred" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceBetweenFiveAndFifteenAndCostBetweenSeventyFiveAndOneHundred2" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceBetweenFiveAndFifteenAndCostBetweenSeventyFiveAndOneHundred3" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceBetweenFiveAndFifteenAndCostBetweenSeventyFiveAndOneHundred4" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testComputeDeliveryCostDistanceBetweenFiveAndFifteenAndCostExceedOneFifty" classname="supereats.core.OrderTest" time="0.001"/>
+  <testcase name="testComputeDeliveryCostDistanceBetweenFiveAndFifteenAndCostExceedOneFifty2" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testCost" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testCostAboveGivenFormula" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testCostAboveOneThousand" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testCostExactlyOneThousand" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testRemoveNonExistingItem" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testRemoveZeroItemsThrowsAndPreservesState" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testSetAddressAboveTwentyKM" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testSetAddressAtTwentyKM" classname="supereats.core.OrderTest" time="0.0"/>
+  <testcase name="testTotalQuantityAtGivenFormulaLimit" classname="supereats.core.OrderTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>
